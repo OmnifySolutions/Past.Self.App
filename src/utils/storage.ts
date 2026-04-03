@@ -43,11 +43,29 @@ export const deleteVideo = async (id: string): Promise<void> => {
 export const checkScheduledVideos = async (): Promise<ScheduledVideo | null> => {
   const videos = await getVideos();
   const now = new Date();
+
   for (const video of videos) {
-    if (video.isActive && video.scheduledFor) {
-      const scheduled = new Date(video.scheduledFor);
-      if (scheduled <= now) return video;
+    if (!video.isActive || !video.scheduledFor) continue;
+
+    const scheduled = new Date(video.scheduledFor);
+    if (scheduled > now) continue;
+
+    // It's due — handle repeat vs one-shot
+    if (!video.repeat || video.repeat === 'never') {
+      // Mark inactive immediately so it never re-triggers
+      await updateVideo(video.id, { isActive: false });
+    } else {
+      // Advance scheduledFor to next future occurrence
+      const { getNextOccurrence } = await import('./repeatUtils');
+      const next = getNextOccurrence(video.scheduledFor, video.repeat);
+      if (next) {
+        await updateVideo(video.id, { scheduledFor: next.toISOString() });
+      } else {
+        await updateVideo(video.id, { isActive: false });
+      }
     }
+
+    return video;
   }
   return null;
 };

@@ -38,7 +38,6 @@ export function RecordScreen({ navigation, route }: Props) {
   const [duration, setDuration] = useState(0);
   const [showPrompts, setShowPrompts] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
-
   const promptsAnim = useRef(new Animated.Value(0)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const cameraRef = useRef<CameraView>(null);
@@ -58,11 +57,15 @@ export function RecordScreen({ navigation, route }: Props) {
     };
   }, []);
 
+  const [isFocused, setIsFocused] = useState(true);
+
   // Stop camera and recording when screen loses focus
   useFocusEffect(
     useCallback(() => {
+      setIsFocused(true);
       setCameraReady(false);
       return () => {
+        setIsFocused(false);
         stopAllTimers();
         if (recordingRef.current && cameraRef.current) {
           try { cameraRef.current.stopRecording(); } catch (e) {}
@@ -183,13 +186,15 @@ export function RecordScreen({ navigation, route }: Props) {
 
   return (
     <View style={styles.container}>
-      <CameraView
-        ref={cameraRef}
-        style={StyleSheet.absoluteFill}
-        facing={facing}
-        mode="video"
-        onCameraReady={() => setCameraReady(true)}
-      />
+      {isFocused && (
+        <CameraView
+          ref={cameraRef}
+          style={StyleSheet.absoluteFill}
+          facing={facing}
+          mode="video"
+          onCameraReady={() => setCameraReady(true)}
+        />
+      )}
 
       <SafeAreaView style={styles.header}>
         <TouchableOpacity onPress={handleBack} style={styles.iconBtn}>

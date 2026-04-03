@@ -4,6 +4,21 @@
 
 ---
 
+## ⚡ Core Instructions for Claude
+
+**Read this every session before doing anything else.**
+
+I need you to be my business partner. Think critically. Give me criticism if something doesn't work. Tell me when something does work. Spar with me, discuss, question — do everything a business partner would do. Keep each other accountable and sharp. Don't just do everything I tell you — think together with me to build the best possible app.
+
+This means:
+- If I ask for something that will hurt UX, say so before implementing it
+- If a feature idea is weak, push back and suggest a better one
+- If something looks good, say so specifically and explain why
+- Flag technical debt, inconsistencies, and risks proactively
+- Never just agree to be agreeable
+
+---
+
 ## App Overview
 
 **Name:** Past.Self. (with periods — always written exactly like this)
@@ -21,11 +36,12 @@
 - **Navigation:** `@react-navigation/native` + `@react-navigation/native-stack`
 - **Storage:** `@react-native-async-storage/async-storage`
 - **Camera/Video:** `expo-camera`, `expo-av` (deprecated but still functional — migrate to `expo-video` before App Store submission)
+- **Gradient:** `expo-linear-gradient` — used for SplashScreen and OnboardingCameraScreen backgrounds
+- **Safe Area:** `react-native-safe-area-context` — use `useSafeAreaInsets` hook, NOT React Native's `SafeAreaView`
 - **Fonts:** `@expo-google-fonts/dancing-script`, `@expo-google-fonts/montserrat`, `@expo-google-fonts/inter`
 - **Icons:** `@expo/vector-icons` (Ionicons)
 - **SVG:** `react-native-svg`
 - **Gestures:** `react-native-gesture-handler`
-- **Safe Area:** `react-native-safe-area-context`
 - **Date Picker:** `@react-native-community/datetimepicker`
 
 ---
@@ -41,6 +57,7 @@ PastSelfApp/
     ├── screens/
     │   ├── SplashScreen.tsx         # Cinematic opening animation (every app open)
     │   ├── OnboardingCameraScreen.tsx # First-time: force user to record immediately
+    │   ├── OnboardingScreen.tsx     # 3-slide "how it works" — currently unused/skipped
     │   ├── HomeScreen.tsx           # Main screen with video list
     │   ├── RecordScreen.tsx         # Camera recording with prompts
     │   ├── ScheduleScreen.tsx       # Set trigger (date/time or app) after recording
@@ -64,9 +81,9 @@ PastSelfApp/
 
 ```
 App opens
-  → SplashScreen (always shown, 2s for returning users, full animation for first-timers)
+  → SplashScreen (always shown)
       → First time: OnboardingCameraScreen → Record → Schedule → Confirmation → Home
-      → Returning: Home
+      → Returning: Home (after short animation)
   
 Home
   → Record → Schedule → Confirmation → Home
@@ -80,75 +97,68 @@ Home
 ## Screen Descriptions
 
 ### SplashScreen
-- Shows every time app opens
-- Cinematic animation: "What if your / Past.Self. could..." enters together, then cycling phrases slide in from right / fade out
-- Phrases: "stop you from wasting time." / "break your bad habits." / "stop you from procrastinating." / "remind you why you started."
-- Phrases in color `#9898d6`, single line, `adjustsFontSizeToFit`, loops continuously
-- After first cycle: "Try It Now" button fades in — leads to OnboardingCameraScreen
-- Returning users: short version (1.5s) then auto-navigates to Home
+- **Background:** `expo-linear-gradient` — `#fdf4f5` → `#f8e8ed` → `#f2d5de` (soft pink gradient)
+- **Sparkles:** 12 animated dots, soft fade-in/drift-up/fade-out loop, sparse placement, `#c9a0aa` color
+- Text layout: "What if your" (Montserrat Bold 26) → "Past.Self." (Dancing Script 56, `#674454`) → "could..." (Montserrat Bold 26) — each on its own line
+- Cycling phrases in `#9898d6`, slide in from right / fade out
+- **Bug fix applied:** Phrases use `finished` callback guard + `isCyclingRef` to prevent double-firing
+- After first cycle: "✓ Try It Now" button fades in — leads to OnboardingCameraScreen
+- "No account needed to start" line has been **removed**
+- Returning users: short animation then auto-navigates to Home
 
 ### OnboardingCameraScreen
 - First-time only (after Try It Now)
-- Title: "Record a message for your future self"
-- Subtitle: "next time you" with cycling completions (e.g. "feel like giving up.")
-- **No skip button** — forces user to record something immediately
-- SVG camera icon, brand gradient background
+- **Background:** `expo-linear-gradient` — `#6b3f52` → `#52303f` → `#35202c` (warm rose to deep plum)
+- **Sparkles:** Same animation as Splash, `#e8c4cc` color, 10 sparkles
+- Camera SVG icon: body + viewfinder bump + lens + flash dot only — NO triangle, NO period, NO extra shapes
+- Icon is centered inside 84×84 circle with `alignItems: 'center', justifyContent: 'center'`
+- Animated prompts fade in/out in `#9898d6` (accent blue/periwinkle)
+- **No skip button** — forces first recording
+- `isCyclingRef` guard prevents double prompt cycling
 
 ### HomeScreen
-- Header: Past.Self. in Brittany font + "Record" button (`#674454`)
-- White background fills status bar area (outerContainer trick)
-- **Upcoming section**: first future-scheduled active video shown as double-height card with large thumbnail, `#9898d6` accent dot badge "Upcoming", excluded from regular list
-- **Regular video cards**: thumbnail (88x88), title, note, trigger info, pause toggle (top of actions, 26px, `#9898d6`), reorder arrows, trash
-- **Pause behavior**: paused cards show "Paused" badge in `#9898d6`, card opacity 0.6
-- **Empty state**: SVG clock illustration, "No videos yet", original copy
-- **How it works**: static section at bottom (not tappable)
-- Delete uses branded modal (not system alert)
+- Uses `useSafeAreaInsets` for status bar (no pink gap at top)
+- Header: Past.Self. in Dancing Script + "Record" button
+- **Three sections:**
+  1. **Upcoming** — first future datetime video, double-height card, `#9898d6` accent
+  2. **Scheduled** — remaining datetime videos
+  3. **App Triggers** — app-trigger videos with their own header (no subtitle)
+- Upcoming card shows `getRepeatDescription()` not raw date when repeat is set
+- Play-once app triggers: **no pause toggle** (only trash). Always-on app triggers keep pause toggle
+- **How It Works:** fixed `minHeight: 56` per row + `alignItems: 'center'` → circle numbers always equidistant
+- Key prop fix: components are `DatetimeCard`, `AppCard` with `key={item.id}`
+- Uses `ScrollView` not `FlatList` to avoid nested list issues
 
 ### RecordScreen
 - Full-screen camera, front-facing by default
-- Flip camera button (top right, hidden while recording)
-- Back arrow → goes back (cancel), stops camera
-- "Need inspiration?" toggle → slides down panel with 12 script prompts in `#9898d6`
-- Progress bar at bottom (thin, `#9898d6` color, turns `#674454` in last 10s)
-- Record button pulses while recording (Animated scale loop)
-- `onCameraReady` guard — recording only starts when camera confirmed ready
-- Camera stops via `useFocusEffect` cleanup when navigating away
-- Max duration: 60 seconds, auto-stops
+- 12 script prompts — spell-checked and grammar-reviewed
+- `useFocusEffect` cleanup stops camera and recording on navigate away
+- `isMountedRef` guards all state updates
+- `onCameraReady` guard before recording
 
 ### ScheduleScreen
 - White background
-- Duration row (tappable → re-records, carries prefill data)
-- Title field, Note field (both have keyboard dismiss)
-- Trigger type: Date & Time OR App Opening (card buttons)
-- **Date & Time**: date/time picker + Repeat chips (Never/Daily/Weekdays/Weekends/Weekly/Monthly)
-  - Shows repeat description: "Every Friday at 9:00 AM"
-  - Shows next occurrence: "Next: 11 Apr · 9:00 AM"
-- **App Opening**: app chips (Instagram/TikTok/Twitter/Facebook/Snapchat/LinkedIn/YouTube/Email/Notes)
-  - Play once toggle with hint text (only visible when ON)
-  - "Video will play every time..." in bold `#674454` when OFF
-- Save → navigates to Confirmation (not Home)
+- Duration row, Title, Note fields
+- Trigger: Date & Time OR App Opening
+- Repeat chips with description + next occurrence display
+- App chips with play-once toggle
 
 ### EditScreen
-- Same layout as ScheduleScreen
-- Re-record button in header (branded alert confirmation)
-- Save → navigates to Confirmation with updated data
-- Back → goes back without saving
+- Same as ScheduleScreen with Re-record button in header
+- Branded alert for re-record confirmation
 
 ### ConfirmationScreen
-- Shown after every save AND every edit
-- Checkmark circle in `#674454`
-- Trigger summary card
-- Video thumbnail (tappable to preview)
-- Note shown if present
-- "Edit" button → EditScreen
-- Manual "Done" button only (no auto-countdown)
+- Trigger card: `justifyContent: 'center'` — icon + text centered in the pink box
+- Manual Done button only (no auto-countdown)
 - Fade-in entrance animation
 
 ### PlaybackScreen
-- Full-screen video playback
+- Full-screen video, no top overlay (title/date/note removed)
 - `#9898d6` progress bar
-- Skip button appears after 5 seconds — **only when `isTriggered: true`** (not manual thumbnail taps)
-- Done button marks video inactive (respects repeat setting)
+- Time stamps (left/right) below bar — no extra icons
+- Done button: text "Done" (not checkmark)
+- Skip button: text "Skip" + icon, appears after 5s — **only when `isTriggered: true`**
+- Uses `useSafeAreaInsets`
 
 ---
 
@@ -182,53 +192,44 @@ interface ScheduledVideo {
 ```
 Background:     #fdf4f5   (barely-there blush, almost white)
 Card/White:     #ffffff
-Accent:         #a194a8   (muted mauve — used for buttons, accents)
-Accent Pressed: #9898d6   (soft periwinkle — used sparingly: progress bars, pause icons, upcoming badge, repeat next date, prompts)
+Accent:         #a194a8   (muted mauve)
+AccentBlue:     #9898d6   (soft periwinkle — used sparingly)
 Text Primary:   #14273c   (deep navy)
 Text Light:     #a194a8
-Danger/CTA:     #674454   (deep rose — primary action buttons, delete, danger states)
+Danger/CTA:     #674454   (deep rose — primary action buttons)
 Border:         rgba(20, 39, 60, 0.08)
 Overlay:        rgba(20, 39, 60, 0.5)
 ```
 
 ### #9898d6 Usage Rule
-Use VERY sparingly — only for: progress bars, pause/play toggle icons, Upcoming badge, "Next:" repeat date, script prompt icons, "Paused" badge. Never for primary actions.
+Use VERY sparingly — only for: progress bars, pause/play toggle icons, Upcoming badge, "Next:" repeat date, script prompt icons, "Paused" badge, animated prompts on onboarding. Never for primary actions.
 
 ### Fonts
 ```
-App name:       Dancing Script Bold (var(--font-brittany) / DancingScript_700Bold)
+App name:       Dancing Script Bold (fonts.brittany / DancingScript_700Bold)
 Headers:        Montserrat Bold (700)
 Subheaders:     Montserrat Medium (500)
 Body/UI:        Inter Regular (400) / Inter Medium (500)
 ```
 
-### Radius (consistent across all elements)
-```
-sm: 6    (chips, small badges)
-md: 10   (inputs, small cards)
-lg: 12   (cards, buttons)
-xl: 16   (modals, large cards)
-full: 999 (pills, dots)
-```
-
-### Spacing (multiples of 4)
-```
-xs: 4, sm: 8, md: 16, lg: 24, xl: 32, xxl: 48
-```
+### Gradient Rule
+**Always use `expo-linear-gradient`** for gradients. Never use layered `View` components with opacity — they create hard color bands, not smooth gradients.
 
 ---
 
 ## Key Logic
 
 ### Storage (upsert pattern — CRITICAL)
-`saveVideo()` checks if ID already exists before inserting. If it does, it updates. This prevents duplicates when re-recording or editing.
+`saveVideo()` checks if ID already exists before inserting. If it does, it updates. Prevents duplicates when re-recording or editing.
 
 ### Auto-trigger
 - Checks every 30 seconds via `setInterval`
 - Also checks on every app foreground via `AppState.addEventListener`
 - Navigates to Playback with `isTriggered: true` when a scheduled video is due
+- One-shot videos: marked `isActive: false` immediately when triggered — never re-fires
+- Repeating videos: `scheduledFor` advanced to next future occurrence via `getNextOccurrence()` — never stuck in past
 
-### Re-record Flow (data preservation)
+### Re-record Flow
 ```
 EditScreen / ScheduleScreen
   → buildPrefill() captures all current form state
@@ -239,9 +240,9 @@ EditScreen / ScheduleScreen
 ```
 
 ### Upcoming Card Logic
-- Finds first video where: `isActive && scheduledFor && future date (or has repeat)`
-- That video is excluded from the regular `regularVideos` list
-- Deleting from upcoming section uses same delete flow
+- Finds first video where: `isActive && scheduledFor && (future date OR has repeat)`
+- That video is excluded from the Scheduled section
+- App triggers NEVER appear in Upcoming — they have their own section
 
 ### Repeat Calculations (repeatUtils.ts)
 - `getNextOccurrence(scheduledFor, repeat)` — returns next future Date
@@ -252,16 +253,16 @@ EditScreen / ScheduleScreen
 ## Known Issues / TODO Before App Store
 
 1. **expo-av deprecated** — migrate to `expo-video` for playback
-2. **SafeAreaView** — replace remaining React Native `SafeAreaView` with `react-native-safe-area-context` version
-3. **App Guard feature (iOS)** — requires native Screen Time API, needs Swift developer
-4. **App Guard feature (Android)** — theoretically possible with accessibility services/overlay permissions, needs native code
-5. **Video thumbnails** — currently uses `videoUri` as thumbnail (works for local files). For production, generate actual frame thumbnails with `expo-video-thumbnails`
-6. **Cloud backup** — not implemented. Videos stored locally only. If user deletes app, all videos lost.
-7. **Push notifications** — alarm trigger currently only works when app is open/foregrounded. True background notifications need `expo-notifications` fully wired up with scheduling.
+2. **App Guard feature (iOS)** — requires native Screen Time API, needs Swift developer
+3. **App Guard feature (Android)** — needs native accessibility services/overlay permissions
+4. **Video thumbnails** — currently uses `videoUri` as thumbnail. Generate real frame thumbnails with `expo-video-thumbnails` for production
+5. **Cloud backup** — not implemented. Videos stored locally only
+6. **Push notifications** — alarm trigger only works when app is open/foregrounded. True background notifications need `expo-notifications` fully wired up
+7. **OnboardingScreen** — the 3-slide walkthrough exists but is currently unused. Decide: keep or remove before App Store
 
 ---
 
-## Business Model (decided)
+## Business Model
 
 - **Free tier**: limited recordings, date/time trigger only, no repeat
 - **Past.Self. Pro — €8.99 one-time**: unlimited videos, App Guard (when built), repeat scheduling, pause/toggle
@@ -270,7 +271,7 @@ EditScreen / ScheduleScreen
 
 ---
 
-## App Store Requirements (when ready)
+## App Store Requirements
 
 - Apple Developer Account: $99/year
 - Google Play: $25 one-time
@@ -280,26 +281,36 @@ EditScreen / ScheduleScreen
 
 ---
 
-## Current Development State (as of last session)
+## Current Development State
 
 **Working:**
 - Full recording flow (camera → schedule → confirmation → home)
 - Date/time trigger with repeat options
-- App trigger (simulated — shows list of apps, doesn't actually intercept)
+- App trigger (simulated)
 - Edit existing videos
-- Pause/unpause videos
-- Upcoming card section
-- Confirmation screen after every save/edit
-- Cinematic splash screen
-- Onboarding camera screen (forces first recording)
+- Pause/unpause videos (play-once app triggers have no pause toggle — intentional)
+- Upcoming card section (datetime only, shows correct repeat label)
+- Confirmation screen — trigger label centered
+- Cinematic splash screen with LinearGradient + sparkle animation (36 sparkles, full screen)
+- OnboardingCameraScreen with LinearGradient + sparkle animation (36 sparkles, full screen)
+- Phrase cycling fixed — freezes on "stop you from wasting time." (no double-display)
+- Phrase order: procrastinating → bad habits → why you started → wasting time (freezes on last)
+- "Try It Now!" button — no checkmark
+- Splash gradient bottom darkened to #e8c0cd for more contrast
+- "Be honest. Be direct." moved to just above record button on OnboardingCamera
+- Separate App Triggers section on HomeScreen
+- How It Works — uniform circle spacing
 - Brand-consistent modals for all alerts
-- Script prompts on camera screen
+- Script prompts on camera screen (spell-checked)
 - Skip button on triggered playback (5s delay)
+- Done button on playback only appears when video finishes (didJustFinish)
 - Auto-trigger check (30s interval + foreground)
+- Auto-trigger bug fixed — one-shot videos marked inactive after firing; repeating videos advance scheduledFor to next future occurrence via getNextOccurrence()
+- Status bar background fix (useSafeAreaInsets)
+- Playback screen — no top overlay tags, clean video
+- Camera green light fix — CameraView unmounts on blur via isFocused state
 
 **Not yet working / known issues:**
-- Camera green light stays on after recording on some devices (useFocusEffect cleanup in place but may need expo-camera version update)
-- Swipe gesture on onboarding (uses react-native-gesture-handler, works when installed)
 - App Guard is simulated only
 - Background notifications not firing when app fully closed
 
@@ -315,8 +326,7 @@ npx expo start --clear
 npx expo install [package-name]
 
 # Reset all app data (for testing fresh install)
-# In the app's storage.ts, temporarily call: AsyncStorage.clear()
-# Or delete and reinstall Expo Go on the test device
+# In storage.ts, temporarily call: AsyncStorage.clear()
 ```
 
 ---
@@ -324,8 +334,6 @@ npx expo install [package-name]
 ## How to Hand Off to a New Claude Session
 
 1. Copy the contents of this file
-2. Start a new Claude conversation or Claude Code session
-3. Paste as first message with: "This is the complete context for Past.Self., a React Native app I'm building. Please read it fully before we continue."
+2. Start a new Claude conversation
+3. Paste as first message with: "This is the complete context for Past.Self., a React Native app I'm building. Please read it fully — especially the Core Instructions — before we continue."
 4. Attach or reference the current codebase
-
-Claude Code will read this file automatically from the project root on every session start.

@@ -20,6 +20,7 @@ export function PlaybackScreen({ route, navigation }: Props) {
   const [video, setVideo] = useState<ScheduledVideo | null>(null);
   const [status, setStatus] = useState<any>({});
   const [secondsWatched, setSecondsWatched] = useState(0);
+  const [videoFinished, setVideoFinished] = useState(false);
   const videoRef = useRef<Video>(null);
   const skipOpacity = useRef(new Animated.Value(0)).current;
   const watchTimer = useRef<NodeJS.Timeout | null>(null);
@@ -56,6 +57,13 @@ export function PlaybackScreen({ route, navigation }: Props) {
     navigation.goBack();
   };
 
+  const handleStatusUpdate = (s: any) => {
+    setStatus(s);
+    if (s.didJustFinish) {
+      setVideoFinished(true);
+    }
+  };
+
   const progress = status.durationMillis
     ? (status.positionMillis / status.durationMillis) * 100 : 0;
 
@@ -75,7 +83,7 @@ export function PlaybackScreen({ route, navigation }: Props) {
         resizeMode={ResizeMode.COVER}
         shouldPlay
         isLooping={false}
-        onPlaybackStatusUpdate={setStatus}
+        onPlaybackStatusUpdate={handleStatusUpdate}
       />
 
       {/* Skip button — only for triggered playback */}
@@ -103,10 +111,12 @@ export function PlaybackScreen({ route, navigation }: Props) {
             {status.durationMillis ? formatTime(status.durationMillis) : '0:00'}
           </Text>
         </View>
-        {/* Done button — text, as it was */}
-        <TouchableOpacity style={styles.doneBtn} onPress={handleDone} activeOpacity={0.85}>
-          <Text style={styles.doneBtnText}>Done</Text>
-        </TouchableOpacity>
+        {/* Done button — only appears when video finishes */}
+        {videoFinished && (
+          <TouchableOpacity style={styles.doneBtn} onPress={handleDone} activeOpacity={0.85}>
+            <Text style={styles.doneBtnText}>Done</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       <BrandAlert {...alertConfig} />

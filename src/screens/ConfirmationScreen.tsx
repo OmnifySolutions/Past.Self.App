@@ -45,7 +45,6 @@ export function ConfirmationScreen({ route, navigation }: Props) {
         opacity: contentOpacity,
         transform: [{ translateY: contentY }],
       }]}>
-        {/* Success icon */}
         <View style={styles.successCircle}>
           <Ionicons name="checkmark" size={36} color="#fff" />
         </View>
@@ -53,7 +52,7 @@ export function ConfirmationScreen({ route, navigation }: Props) {
         <Text style={styles.title}>Message saved</Text>
         <Text style={styles.subtitle}>Your past self is ready to show up.</Text>
 
-        {/* Trigger summary */}
+        {/* Trigger card — icon + text centered together */}
         <View style={styles.triggerCard}>
           <Ionicons
             name={appName ? 'phone-portrait-outline' : 'calendar-outline'}
@@ -62,7 +61,6 @@ export function ConfirmationScreen({ route, navigation }: Props) {
           <Text style={styles.triggerText}>{formatTrigger()}</Text>
         </View>
 
-        {/* Video thumbnail preview */}
         {thumbnail ? (
           <View style={styles.thumbnailContainer}>
             <TouchableOpacity
@@ -93,7 +91,6 @@ export function ConfirmationScreen({ route, navigation }: Props) {
         ) : null}
       </Animated.View>
 
-      {/* Done button */}
       <View style={styles.footer}>
         <TouchableOpacity style={styles.doneBtn} onPress={() => navigation.replace('Home')} activeOpacity={0.85}>
           <Text style={styles.doneBtnText}>Done</Text>
@@ -105,7 +102,10 @@ export function ConfirmationScreen({ route, navigation }: Props) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.card },
-  content: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.lg, gap: spacing.lg },
+  content: {
+    flex: 1, alignItems: 'center', justifyContent: 'center',
+    padding: spacing.lg, gap: spacing.lg,
+  },
   successCircle: {
     width: 72, height: 72, borderRadius: 36,
     backgroundColor: '#674454',
@@ -113,12 +113,26 @@ const styles = StyleSheet.create({
   },
   title: { fontFamily: fonts.montserratBold, fontSize: 26, color: colors.text },
   subtitle: { fontFamily: fonts.inter, fontSize: 15, color: colors.textLight, textAlign: 'center' },
+
+  // Trigger card: centered row — icon + text together in the middle
   triggerCard: {
-    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
-    backgroundColor: colors.background, borderRadius: radius.lg,
-    padding: spacing.md, width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.background,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    width: '100%',
   },
-  triggerText: { fontFamily: fonts.montserratMedium, fontSize: 14, color: colors.text, flex: 1 },
+  triggerText: {
+    fontFamily: fonts.montserratMedium,
+    fontSize: 14,
+    color: colors.text,
+    textAlign: 'center',
+    flexShrink: 1,
+  },
+
   thumbnailContainer: { width: '100%', gap: spacing.sm },
   thumbnail: {
     width: '100%', height: 180, borderRadius: radius.lg,
@@ -129,9 +143,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.25)',
     alignItems: 'center', justifyContent: 'center',
   },
-  videoMeta: {
-    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
-  },
+  videoMeta: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   videoMetaLeft: { flex: 1 },
   videoLabel: { fontFamily: fonts.montserratBold, fontSize: 15, color: colors.text },
   videoNote: { fontFamily: fonts.inter, fontSize: 12, color: colors.textLight, marginTop: 2 },
@@ -142,6 +154,9 @@ const styles = StyleSheet.create({
   },
   editBtnText: { fontFamily: fonts.montserratMedium, fontSize: 12, color: colors.danger },
   footer: { padding: spacing.lg, paddingBottom: spacing.xl },
-  doneBtn: { backgroundColor: colors.danger, borderRadius: radius.lg, padding: spacing.md, alignItems: 'center' },
+  doneBtn: {
+    backgroundColor: colors.danger, borderRadius: radius.lg,
+    padding: spacing.md, alignItems: 'center',
+  },
   doneBtnText: { fontFamily: fonts.montserratBold, fontSize: 15, color: '#fff' },
 });
