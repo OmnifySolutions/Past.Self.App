@@ -10,7 +10,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { DancingScript_700Bold } from '@expo-google-fonts/dancing-script';
 import { Montserrat_500Medium, Montserrat_700Bold } from '@expo-google-fonts/montserrat';
 import { Inter_400Regular, Inter_500Medium } from '@expo-google-fonts/inter';
-import { isOnboarded, checkScheduledVideos } from './src/utils/storage';
+import { isOnboarded } from './src/utils/storage';
 import { SplashScreen as AppSplash } from './src/screens/SplashScreen';
 import { OnboardingCameraScreen } from './src/screens/OnboardingCameraScreen';
 import { HomeScreen } from './src/screens/HomeScreen';
@@ -35,27 +35,27 @@ export interface PrefillData {
 }
 
 export type RootStackParamList = {
-  Splash:          { isFirstTime: boolean };
+  Splash: { isFirstTime: boolean };
   OnboardingCamera: undefined;
-  Home:            undefined;
-  Record:          { prefill?: PrefillData } | undefined;
+  Home: undefined;
+  Record: { prefill?: PrefillData } | undefined;
   Schedule: {
-    videoUri:   string;
-    duration:   number;
-    thumbnail:  string;
-    prefill?:   PrefillData;
+    videoUri: string;
+    duration: number;
+    thumbnail: string;
+    prefill?: PrefillData;
   };
-  Playback:        { videoId: string; isTriggered?: boolean };
-  Edit:            { videoId: string };
+  Playback: { videoId: string; isTriggered?: boolean };
+  Edit: { videoId: string };
   Confirmation: {
-    videoId:      string;
-    thumbnail:    string;
-    title:        string;
-    message?:     string;
+    videoId: string;
+    thumbnail: string;
+    title: string;
+    message?: string;
     scheduledFor?: string;
-    repeat?:      string;
-    appName?:     string;
-    playOnce?:    boolean;
+    repeat?: string;
+    appName?: string;
+    playOnce?: boolean;
   };
 };
 
@@ -63,40 +63,27 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export default function App() {
   const [appReady, setAppReady] = useState(false);
-  const [isFirst,  setIsFirst]  = useState(true);
+  const [isFirst, setIsFirst] = useState(true);
+
   const navigationRef = useRef<any>(null);
 
-  // FIX: Helper to safely trigger a playback navigation.
-  // Guards against navigationRef not yet ready (race condition on cold start).
-  const triggerPlayback = (videoId: string) => {
-    if (navigationRef.current?.isReady()) {
-      navigationRef.current.navigate('Playback', { videoId, isTriggered: true });
-    }
-  };
-
-  // FIX: checkScheduledVideos is now a top-level import (no dynamic import inside interval).
-  const checkVideos = useCallback(async () => {
-    const video = await checkScheduledVideos();
-    if (video) {
-      triggerPlayback(video.id);
-    }
-  }, []);
-
+  // Check for scheduled videos every 30s and on app foreground
   useEffect(() => {
-    // FIX: Call immediately on mount so cold-start triggers fire right away,
-    // not 30 seconds later or only on next foreground.
-    checkVideos();
+    const checkVideos = async () => {
+      const { checkScheduledVideos } = await import('./src/utils/storage');
+      const video = await checkScheduledVideos();
+      if (video && navigationRef.current) {
+        navigationRef.current.navigate('Playback', { videoId: video.id, isTriggered: true });
+      }
+    };
 
     const interval = setInterval(checkVideos, 30000);
     const sub = AppState.addEventListener('change', state => {
       if (state === 'active') checkVideos();
     });
 
-    return () => {
-      clearInterval(interval);
-      sub.remove();
-    };
-  }, [checkVideos]);
+    return () => { clearInterval(interval); sub.remove(); };
+  }, []);
 
   useEffect(() => {
     async function prepare() {
@@ -134,42 +121,14 @@ export default function App() {
             initialRouteName="Splash"
             screenOptions={{ headerShown: false, animation: 'fade' }}
           >
-            <Stack.Screen
-              name="Splash"
-              component={AppSplash}
-              initialParams={{ isFirstTime: isFirst }}
-            />
+            <Stack.Screen name="Splash" component={AppSplash} initialParams={{ isFirstTime: isFirst }} />
             <Stack.Screen name="OnboardingCamera" component={OnboardingCameraScreen} />
-            <Stack.Screen
-              name="Home"
-              component={HomeScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="Record"
-              component={RecordScreen}
-              options={{ animation: 'slide_from_bottom' }}
-            />
-            <Stack.Screen
-              name="Schedule"
-              component={ScheduleScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="Playback"
-              component={PlaybackScreen}
-              options={{ animation: 'fade' }}
-            />
-            <Stack.Screen
-              name="Edit"
-              component={EditScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="Confirmation"
-              component={ConfirmationScreen}
-              options={{ animation: 'slide_from_bottom' }}
-            />
+            <Stack.Screen name="Home" component={HomeScreen} options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen name="Record" component={RecordScreen} options={{ animation: 'slide_from_bottom' }} />
+            <Stack.Screen name="Schedule" component={ScheduleScreen} options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen name="Playback" component={PlaybackScreen} options={{ animation: 'fade' }} />
+            <Stack.Screen name="Edit" component={EditScreen} options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen name="Confirmation" component={ConfirmationScreen} options={{ animation: 'slide_from_bottom' }} />
           </Stack.Navigator>
         </NavigationContainer>
       </SafeAreaProvider>

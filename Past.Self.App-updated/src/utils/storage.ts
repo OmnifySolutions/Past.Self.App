@@ -1,6 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ScheduledVideo } from '../types/video';
-import { getNextOccurrence } from './repeatUtils';
 
 const STORAGE_KEY = 'pastself_videos';
 const ONBOARDED_KEY = 'pastself_onboarded';
@@ -46,39 +45,28 @@ export const checkScheduledVideos = async (): Promise<ScheduledVideo | null> => 
   const now = new Date();
 
   for (const video of videos) {
-    // Skip if system-deactivated OR user has manually paused
-    if (!video.isActive || video.isPaused) continue;
+    if (!video.isActive || !video.scheduledFor) continue;
 
-    // --- Datetime trigger ---
-    if (video.scheduledFor) {
-      const scheduled = new Date(video.scheduledFor);
-      if (scheduled > now) continue;
+    const scheduled = new Date(video.scheduledFor);
+    if (scheduled > now) continue;
 
-      // It's due — handle repeat vs one-shot
-      if (!video.repeat || video.repeat === 'never') {
-        await updateVideo(video.id, { isActive: false });
+    // It's due — handle repeat vs one-shot
+    if (!video.repeat || video.repeat === 'never') {
+      // Mark inactive immediately so it never re-triggers
+      await updateVideo(video.id, { isActive: false });
+    } else {
+      // Advance scheduledFor to next future occurrence
+      const { getNextOccurrence } = await import('./repeatUtils');
+      const next = getNextOccurrence(video.scheduledFor, video.repeat);
+      if (next) {
+        await updateVideo(video.id, { scheduledFor: next.toISOString() });
       } else {
-        const next = getNextOccurrence(video.scheduledFor, video.repeat);
-        if (next) {
-          await updateVideo(video.id, { scheduledFor: next.toISOString() });
-        } else {
-          await updateVideo(video.id, { isActive: false });
-        }
+        await updateVideo(video.id, { isActive: false });
       }
-
-      return video;
     }
 
-    // --- App trigger (play-once that hasn't played yet) ---
-    // Real app detection is not yet wired; this handles the hasPlayed gate
-    // so that once played via PlaybackScreen, it won't re-queue.
-    if (video.appTrigger) {
-      if (video.appTrigger.playOnce && video.appTrigger.hasPlayed) continue;
-      // Non-play-once app triggers are handled externally (when app guard fires)
-      // We do NOT auto-trigger them from this scheduler loop.
-    }
+    return video;
   }
-
   return null;
 };
 

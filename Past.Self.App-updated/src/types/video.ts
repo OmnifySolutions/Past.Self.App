@@ -13,8 +13,7 @@ export interface ScheduledVideo {
     hasPlayed?: boolean;
   };
   duration: number;
-  isActive: boolean;   // controlled by the trigger system (played, expired, etc.)
-  isPaused?: boolean;  // controlled by the user manually via the toggle on the card
+  isActive: boolean;
 }
 
 export type TriggerType = 'datetime' | 'app';

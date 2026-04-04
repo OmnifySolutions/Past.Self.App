@@ -211,14 +211,6 @@ export function RecordScreen({ navigation, route }: Props) {
         ) : <View style={styles.iconBtn} />}
       </SafeAreaView>
 
-
-      {/* Thought bubble */}
-      {!isRecording && (
-        <View style={styles.thoughtBubble}>
-          <Text style={styles.thoughtBubbleText}>{"What would you like your\nfuture self to know?"}</Text>
-        </View>
-      )}
-
       {/* Script prompts panel */}
       {!isRecording && (
         <Animated.View style={[styles.promptsPanel, {
@@ -329,26 +321,6 @@ const styles = StyleSheet.create({
   },
   recordBtnActive: { backgroundColor: '#8b3a4a' },
   stopIcon: { width: 24, height: 24, backgroundColor: '#fff', borderRadius: 4 },
-  thoughtBubble: {
-    position: 'absolute',
-    top: 128,
-    left: 70,
-    right: 70,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.25)',
-    alignItems: 'center',
-  },
-  thoughtBubbleText: {
-    fontFamily: fonts.inter,
-    fontSize: 14,
-    color: 'rgba(255,255,255,0.92)',
-    textAlign: 'center',
-    lineHeight: 21,
-  },
   hint: { fontFamily: fonts.inter, fontSize: 13, color: 'rgba(255,255,255,0.7)' },
   permTitle: { fontFamily: fonts.montserratBold, fontSize: 20, color: '#fff', textAlign: 'center', marginBottom: spacing.sm },
   permBody: { fontFamily: fonts.inter, fontSize: 14, color: 'rgba(255,255,255,0.7)', textAlign: 'center', marginBottom: spacing.lg },
