@@ -1,18 +1,22 @@
 import { useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  SafeAreaView, Image, Animated,
+  Image, Animated,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { CommonActions } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { RootStackParamList } from '../../App';
 import { colors, fonts, spacing, radius } from '../styles/theme';
 import { getRepeatDescription } from '../utils/repeatUtils';
+import { setOnboarded } from '../utils/storage';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Confirmation'>;
 
 export function ConfirmationScreen({ route, navigation }: Props) {
   const { videoId, thumbnail, title, message, scheduledFor, repeat, appName, playOnce } = route.params;
+  const insets = useSafeAreaInsets();
   const contentOpacity = useRef(new Animated.Value(0)).current;
   const contentY = useRef(new Animated.Value(16)).current;
 
@@ -39,8 +43,18 @@ export function ConfirmationScreen({ route, navigation }: Props) {
     return '';
   };
 
+  const handleDone = async () => {
+    await setOnboarded();
+    navigation.dispatch(
+      CommonActions.reset({
+        index: 0,
+        routes: [{ name: 'Home' }],
+      })
+    );
+  };
+
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={[styles.container, { paddingTop: insets.top }]}>
       <Animated.View style={[styles.content, {
         opacity: contentOpacity,
         transform: [{ translateY: contentY }],
@@ -52,7 +66,6 @@ export function ConfirmationScreen({ route, navigation }: Props) {
         <Text style={styles.title}>Message saved</Text>
         <Text style={styles.subtitle}>Your past self is ready to show up.</Text>
 
-        {/* Trigger card — icon + text centered together */}
         <View style={styles.triggerCard}>
           <Ionicons
             name={appName ? 'phone-portrait-outline' : 'calendar-outline'}
@@ -91,12 +104,12 @@ export function ConfirmationScreen({ route, navigation }: Props) {
         ) : null}
       </Animated.View>
 
-      <View style={styles.footer}>
-        <TouchableOpacity style={styles.doneBtn} onPress={() => navigation.replace('Home')} activeOpacity={0.85}>
+      <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.md }]}>
+        <TouchableOpacity style={styles.doneBtn} onPress={handleDone} activeOpacity={0.85}>
           <Text style={styles.doneBtnText}>Done</Text>
         </TouchableOpacity>
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -111,28 +124,17 @@ const styles = StyleSheet.create({
     backgroundColor: '#674454',
     alignItems: 'center', justifyContent: 'center',
   },
-  title: { fontFamily: fonts.montserratBold, fontSize: 26, color: colors.text },
+  title:    { fontFamily: fonts.montserratBold, fontSize: 26, color: colors.text },
   subtitle: { fontFamily: fonts.inter, fontSize: 15, color: colors.textLight, textAlign: 'center' },
-
-  // Trigger card: centered row — icon + text together in the middle
   triggerCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.sm,
-    backgroundColor: colors.background,
-    borderRadius: radius.lg,
-    padding: spacing.md,
-    width: '100%',
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: spacing.sm, backgroundColor: colors.background,
+    borderRadius: radius.lg, padding: spacing.md, width: '100%',
   },
   triggerText: {
-    fontFamily: fonts.montserratMedium,
-    fontSize: 14,
-    color: colors.text,
-    textAlign: 'center',
-    flexShrink: 1,
+    fontFamily: fonts.montserratMedium, fontSize: 14,
+    color: colors.text, textAlign: 'center', flexShrink: 1,
   },
-
   thumbnailContainer: { width: '100%', gap: spacing.sm },
   thumbnail: {
     width: '100%', height: 180, borderRadius: radius.lg,
@@ -143,20 +145,17 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.25)',
     alignItems: 'center', justifyContent: 'center',
   },
-  videoMeta: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  videoMeta:     { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   videoMetaLeft: { flex: 1 },
-  videoLabel: { fontFamily: fonts.montserratBold, fontSize: 15, color: colors.text },
-  videoNote: { fontFamily: fonts.inter, fontSize: 12, color: colors.textLight, marginTop: 2 },
+  videoLabel:    { fontFamily: fonts.montserratBold, fontSize: 15, color: colors.text },
+  videoNote:     { fontFamily: fonts.inter, fontSize: 12, color: colors.textLight, marginTop: 2 },
   editBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
     borderWidth: 1.5, borderColor: colors.danger, borderRadius: radius.md,
     paddingHorizontal: spacing.sm, paddingVertical: 5,
   },
-  editBtnText: { fontFamily: fonts.montserratMedium, fontSize: 12, color: colors.danger },
-  footer: { padding: spacing.lg, paddingBottom: spacing.xl },
-  doneBtn: {
-    backgroundColor: colors.danger, borderRadius: radius.lg,
-    padding: spacing.md, alignItems: 'center',
-  },
-  doneBtnText: { fontFamily: fonts.montserratBold, fontSize: 15, color: '#fff' },
+  editBtnText:  { fontFamily: fonts.montserratMedium, fontSize: 12, color: colors.danger },
+  footer:       { padding: spacing.lg },
+  doneBtn:      { backgroundColor: colors.danger, borderRadius: radius.lg, padding: spacing.md, alignItems: 'center' },
+  doneBtnText:  { fontFamily: fonts.montserratBold, fontSize: 15, color: '#fff' },
 });

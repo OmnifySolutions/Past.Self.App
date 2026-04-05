@@ -1,3 +1,6 @@
+// FIX: repeat typed as union literal — typos now caught at compile time
+export type RepeatOption = 'never' | 'daily' | 'weekdays' | 'weekends' | 'weekly' | 'monthly';
+
 export interface ScheduledVideo {
   id: string;
   videoUri: string;
@@ -6,7 +9,7 @@ export interface ScheduledVideo {
   message: string;
   createdAt: string;
   scheduledFor?: string;
-  repeat?: string;
+  repeat?: RepeatOption;         // FIX: was `string`, now strictly typed
   appTrigger?: {
     appName: string;
     playOnce: boolean;

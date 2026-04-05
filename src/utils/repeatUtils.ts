@@ -1,4 +1,8 @@
-export function getNextRepeatDate(fromDate: Date, repeat: string): Date {
+import { RepeatOption } from '../types/video';
+
+// FIX: All functions now use RepeatOption instead of string — typos caught at compile time
+
+export function getNextRepeatDate(fromDate: Date, repeat: RepeatOption): Date {
   const next = new Date(fromDate);
 
   switch (repeat) {
@@ -27,17 +31,15 @@ export function getNextRepeatDate(fromDate: Date, repeat: string): Date {
       break;
 
     case 'monthly': {
-      // FIX: Preserve the original day-of-month to avoid drift.
-      // e.g. Jan 31 → Feb 28 (not Mar 3), Mar 31 → Apr 30 (not May 1).
       const originalDay = fromDate.getDate();
       next.setMonth(next.getMonth() + 1);
-      // If JS overflowed (e.g. Jan 31 → Mar 3), clamp back to last day of target month.
       if (next.getDate() !== originalDay) {
-        next.setDate(0); // day 0 = last day of previous month
+        next.setDate(0); // clamp to last day of target month
       }
       break;
     }
 
+    case 'never':
     default:
       break;
   }
@@ -45,7 +47,7 @@ export function getNextRepeatDate(fromDate: Date, repeat: string): Date {
   return next;
 }
 
-export function getRepeatDescription(date: Date, repeat: string): string {
+export function getRepeatDescription(date: Date, repeat: RepeatOption): string {
   const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const day = days[date.getDay()];
@@ -62,21 +64,18 @@ export function getRepeatDescription(date: Date, repeat: string): string {
   }
 }
 
-export function getNextOccurrence(scheduledFor: string, repeat: string): Date | null {
+export function getNextOccurrence(scheduledFor: string, repeat: RepeatOption): Date | null {
   if (!repeat || repeat === 'never') return null;
 
   const base = new Date(scheduledFor);
   const now = new Date();
   let next = new Date(base);
 
-  // FIX: Reduced safety counter to a sensible max (60 = 2 months of daily checks).
-  // 400 was excessive and masked infinite-loop bugs.
   let safety = 0;
   while (next <= now && safety < 60) {
     next = getNextRepeatDate(next, repeat);
     safety++;
   }
 
-  // If we couldn't find a future date (shouldn't happen with valid repeat values), return null.
   return next > now ? next : null;
 }

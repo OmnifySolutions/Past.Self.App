@@ -1,14 +1,17 @@
 import { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
-  TextInput, Switch, SafeAreaView, Platform, Keyboard,
+  TextInput, Switch, Platform, Keyboard,
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
+// FIX: Removed SafeAreaView from react-native — caused pink status bar gap on iOS.
+// Use useSafeAreaInsets hook instead (same pattern as ScheduleScreen).
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { RootStackParamList, PrefillData } from '../../App';
 import { getVideos, updateVideo } from '../utils/storage';
-import { ScheduledVideo, TriggerType } from '../types/video';
+import { ScheduledVideo, TriggerType, RepeatOption } from '../types/video';
 import { colors, fonts, spacing, radius } from '../styles/theme';
 import { BrandAlert, useBrandAlert } from '../components/BrandAlert';
 import { getRepeatDescription, getNextOccurrence } from '../utils/repeatUtils';
@@ -16,7 +19,7 @@ import { getRepeatDescription, getNextOccurrence } from '../utils/repeatUtils';
 type Props = NativeStackScreenProps<RootStackParamList, 'Edit'>;
 
 const POPULAR_APPS = ['Instagram','TikTok','Twitter/X','Facebook','Snapchat','LinkedIn','YouTube','Email','Notes'];
-const REPEAT_OPTIONS = [
+const REPEAT_OPTIONS: { label: string; value: RepeatOption }[] = [
   { label: 'Never', value: 'never' },
   { label: 'Daily', value: 'daily' },
   { label: 'Weekdays', value: 'weekdays' },
@@ -27,13 +30,15 @@ const REPEAT_OPTIONS = [
 
 export function EditScreen({ route, navigation }: Props) {
   const { videoId } = route.params;
+  // FIX: useSafeAreaInsets instead of SafeAreaView wrapper
+  const insets = useSafeAreaInsets();
   const [video, setVideo] = useState<ScheduledVideo | null>(null);
   const [title, setTitle] = useState('');
   const [message, setMessage] = useState('');
   const [triggerType, setTriggerType] = useState<TriggerType>('datetime');
   const [date, setDate] = useState(new Date());
   const [showPicker, setShowPicker] = useState(false);
-  const [repeat, setRepeat] = useState('never');
+  const [repeat, setRepeat] = useState<RepeatOption>('never'); // FIX: RepeatOption not string
   const [selectedApp, setSelectedApp] = useState('');
   const [playOnce, setPlayOnce] = useState(true);
   const { alertConfig, showAlert, hideAlert } = useBrandAlert();
@@ -117,7 +122,6 @@ export function EditScreen({ route, navigation }: Props) {
 
     await updateVideo(videoId, updates);
 
-    // Navigate to Confirmation with updated data
     navigation.navigate('Confirmation', {
       videoId,
       thumbnail: video?.thumbnail || '',
@@ -135,8 +139,9 @@ export function EditScreen({ route, navigation }: Props) {
 
   if (!video) return <View style={{ flex: 1, backgroundColor: colors.card }} />;
 
+  // FIX: Replaced <SafeAreaView> wrapper with <View> + paddingTop from insets
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={22} color={colors.text} />
@@ -238,6 +243,11 @@ export function EditScreen({ route, navigation }: Props) {
 
         {triggerType === 'app' && (
           <View style={styles.section}>
+            {/* FIX: "Coming Soon" notice — app trigger is not yet functional */}
+            <View style={styles.comingSoonBanner}>
+              <Ionicons name="construct-outline" size={14} color={colors.accent} />
+              <Text style={styles.comingSoonText}>App Guard is coming soon — video won't auto-trigger yet</Text>
+            </View>
             <Text style={styles.sublabel}>Select App</Text>
             <View style={styles.repeatGrid}>
               {POPULAR_APPS.map(app => (
@@ -265,14 +275,14 @@ export function EditScreen({ route, navigation }: Props) {
         )}
       </ScrollView>
 
-      <View style={styles.footer}>
+      <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.sm }]}>
         <TouchableOpacity style={styles.saveBtn} onPress={handleSave} activeOpacity={0.85}>
           <Text style={styles.saveBtnText}>Save Changes</Text>
         </TouchableOpacity>
       </View>
 
       <BrandAlert {...alertConfig} />
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -329,6 +339,12 @@ const styles = StyleSheet.create({
   repeatInfo: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   repeatInfoText: { fontFamily: fonts.montserratBold, fontSize: 12, color: colors.danger, flex: 1 },
   repeatNextText: { fontFamily: fonts.inter, fontSize: 12, color: '#9898d6', flex: 1 },
+  comingSoonBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
+    backgroundColor: colors.card, borderRadius: radius.md, padding: spacing.sm,
+    borderWidth: 1, borderColor: colors.border,
+  },
+  comingSoonText: { fontFamily: fonts.inter, fontSize: 12, color: colors.accent, flex: 1 },
   playOnceRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     backgroundColor: colors.card, borderRadius: radius.md, padding: spacing.md,
@@ -337,7 +353,7 @@ const styles = StyleSheet.create({
   playOnceTitle: { fontFamily: fonts.montserratMedium, fontSize: 14, color: colors.text },
   playOnceHint: { fontFamily: fonts.inter, fontSize: 11, color: colors.textLight, marginTop: 2 },
   alwaysHint: { fontFamily: fonts.montserratBold, fontSize: 12, color: colors.danger },
-  footer: { padding: spacing.md, backgroundColor: colors.card },
+  footer: { padding: spacing.md, paddingTop: spacing.sm, backgroundColor: colors.card },
   saveBtn: { backgroundColor: colors.danger, borderRadius: radius.lg, padding: spacing.md, alignItems: 'center' },
   saveBtnText: { fontFamily: fonts.montserratBold, fontSize: 14, color: '#fff' },
 });

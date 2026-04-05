@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
   ScrollView, Image, PanResponder, Animated,
-  Platform, UIManager, LayoutAnimation,
+  Platform, UIManager, LayoutAnimation, Pressable,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
@@ -10,7 +10,7 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Circle, Line } from 'react-native-svg';
 import { RootStackParamList } from '../../App';
-import { getVideos, deleteVideo, saveVideos, updateVideo } from '../utils/storage';
+import { getVideos, deleteVideo, saveVideos, updateVideo, checkScheduledVideos } from '../utils/storage';
 import { ScheduledVideo } from '../types/video';
 import { colors, fonts, spacing, radius } from '../styles/theme';
 import { BrandAlert, useBrandAlert } from '../components/BrandAlert';
@@ -23,7 +23,8 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 type Props = NativeStackScreenProps<RootStackParamList, 'Home'>;
 
 const DELETE_ZONE_WIDTH = 72;
-const CARD_HEIGHT = 104; // card height + marginBottom — adjust if card size changes
+const CARD_HEIGHT = 112;
+const LONG_PRESS_MS = 400;
 
 // ─── Clock SVG ────────────────────────────────────────────────────────────────
 const ClockIcon = () => (
@@ -36,8 +37,6 @@ const ClockIcon = () => (
 );
 
 // ─── iOS-style toggle ─────────────────────────────────────────────────────────
-// Defined outside HomeScreen so React never treats it as a new component type
-// on re-render — which was causing the UpcomingCard thumbnail to flicker.
 const AlarmToggle = ({
   value,
   onValueChange,
@@ -62,7 +61,7 @@ const AlarmToggle = ({
   return (
     <TouchableOpacity
       onPress={onValueChange}
-      activeOpacity={0.85}
+      activeOpacity={1}
       hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
     >
       <View style={[s.toggleTrack, value ? s.toggleTrackOn : s.toggleTrackOff]}>
@@ -73,54 +72,106 @@ const AlarmToggle = ({
 };
 
 // ─── Swipe-to-delete wrapper ──────────────────────────────────────────────────
-const SWIPE_THRESHOLD = 60;
+// ROOT CAUSE OF DELETE ZONE PEEK:
+// The delete zone was always rendered behind the card. When TouchableOpacity
+// dimmed the card on press (activeOpacity < 1), the red zone bled through.
+//
+// FIX:
+// 1. swipeContainer backgroundColor = colors.danger (the red zone colour)
+// 2. The card itself has a solid white background, so at rest it covers the red
+// 3. A cover view slides WITH the card on its right edge — when card moves left,
+//    the cover moves right to always hide the zone until intentionally swiped
+// 4. All card TouchableOpacity use activeOpacity={1} — no dimming ever
 
-const SwipeableCard = ({
-  onDelete,
-  children,
-}: {
+const SWIPE_THRESHOLD = 52;
+
+type SwipeableCardProps = {
   onDelete: () => void;
+  freeze?: boolean;
+  closeSignal?: number;
   children: React.ReactNode;
-}) => {
-  const translateX = useRef(new Animated.Value(0)).current;
+};
+
+const SwipeableCard = ({ onDelete, freeze, closeSignal, children }: SwipeableCardProps) => {
+  const currentX   = useRef(0);
+  const offsetX    = useRef(0);
   const isOpen     = useRef(false);
+  const translateX = useRef(new Animated.Value(0)).current;
+  const animation  = useRef<Animated.CompositeAnimation | null>(null);
+
+  useEffect(() => {
+    const id = translateX.addListener(({ value }) => { currentX.current = value; });
+    return () => translateX.removeListener(id);
+  }, []);
+
+  const animateTo = useCallback((toValue: number, cb?: () => void) => {
+    animation.current?.stop();
+    animation.current = Animated.spring(translateX, {
+      toValue,
+      useNativeDriver: true,
+      bounciness: 0,
+      speed: 20,
+    });
+    animation.current.start(() => {
+      offsetX.current = toValue;
+      cb?.();
+    });
+  }, []);
 
   const close = useCallback(() => {
-    Animated.spring(translateX, { toValue: 0, useNativeDriver: true, bounciness: 0 }).start();
     isOpen.current = false;
-  }, []);
+    offsetX.current = 0;
+    animateTo(0);
+  }, [animateTo]);
+
+  const open = useCallback(() => {
+    isOpen.current = true;
+    animateTo(-DELETE_ZONE_WIDTH);
+  }, [animateTo]);
+
+  useEffect(() => {
+    if (closeSignal !== undefined && isOpen.current) close();
+  }, [closeSignal]);
+
+  useEffect(() => {
+    if (!freeze && isOpen.current) {
+      const t = setTimeout(close, 200);
+      return () => clearTimeout(t);
+    }
+  }, [freeze]);
 
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => false,
       onMoveShouldSetPanResponder: (_, g) =>
-        Math.abs(g.dx) > 8 && Math.abs(g.dx) > Math.abs(g.dy) * 1.5,
+        Math.abs(g.dx) > 10 && Math.abs(g.dx) > Math.abs(g.dy) * 2,
       onPanResponderGrant: () => {
-        translateX.setOffset(isOpen.current ? -DELETE_ZONE_WIDTH : 0);
-        translateX.setValue(0);
+        animation.current?.stop();
+        translateX.setValue(currentX.current);
+        offsetX.current = currentX.current;
       },
       onPanResponderMove: (_, g) => {
-        const clamped = Math.min(0, Math.max(-(DELETE_ZONE_WIDTH + 16), g.dx));
+        const raw     = offsetX.current + g.dx;
+        const clamped = Math.min(0, Math.max(-(DELETE_ZONE_WIDTH + 12), raw));
         translateX.setValue(clamped);
       },
       onPanResponderRelease: (_, g) => {
-        translateX.flattenOffset();
-        const raw = (translateX as any)._value as number;
-        if (raw < -SWIPE_THRESHOLD || g.vx < -0.6) {
-          Animated.spring(translateX, { toValue: -DELETE_ZONE_WIDTH, useNativeDriver: true, bounciness: 0 }).start();
-          isOpen.current = true;
+        if (currentX.current < -SWIPE_THRESHOLD || g.vx < -0.5) {
+          open();
         } else {
-          Animated.spring(translateX, { toValue: 0, useNativeDriver: true, bounciness: 0 }).start();
-          isOpen.current = false;
+          close();
         }
       },
-      onPanResponderTerminate: () => {
-        translateX.flattenOffset();
-        Animated.spring(translateX, { toValue: 0, useNativeDriver: true, bounciness: 0 }).start();
-        isOpen.current = false;
-      },
+      onPanResponderTerminate: () => close(),
     })
   ).current;
+
+  // Cover slides with the card to keep delete zone hidden at rest
+  const coverTranslateX = translateX.interpolate({
+    inputRange: [-DELETE_ZONE_WIDTH, 0],
+    outputRange: [0, DELETE_ZONE_WIDTH],
+    extrapolate: 'clamp',
+  });
 
   return (
     <View style={s.swipeContainer}>
@@ -134,17 +185,31 @@ const SwipeableCard = ({
           <Text style={s.deleteActionText}>Delete</Text>
         </TouchableOpacity>
       </View>
-      <Animated.View style={{ transform: [{ translateX }] }} {...panResponder.panHandlers}>
+      <Animated.View
+        style={{ transform: [{ translateX }] }}
+        {...panResponder.panHandlers}
+      >
         {children}
+        <Animated.View
+          style={[s.deleteZoneCover, { transform: [{ translateX: coverTranslateX }] }]}
+          pointerEvents="none"
+        />
       </Animated.View>
     </View>
   );
 };
 
 // ─── Drag-to-reorder list ─────────────────────────────────────────────────────
-// The fix for twitching: use a stable `order` state array (IDs only).
-// During drag, we only move the dragged card visually (translateY on the Animated.View).
-// We commit the new order to state only on release — no mid-drag state mutations.
+// ROOT CAUSE OF DRAG NOT WORKING:
+// Long-press timer inside onPanResponderGrant was cancelled by onPanResponderMove
+// firing within milliseconds — iOS sends touch move events even for stationary
+// fingers (digitiser noise), with tiny dx/dy values that exceeded our 8px cancel
+// threshold before 350ms elapsed.
+//
+// FIX: Use Pressable onLongPress for activation (OS-level, reliable, no noise).
+// A shared PanResponder handles movement AFTER activation via isDraggingRef.
+// The two are fully decoupled — Pressable fires → sets flag → PanResponder moves.
+
 const DraggableList = ({
   items,
   onScrollEnable,
@@ -153,15 +218,32 @@ const DraggableList = ({
 }: {
   items: ScheduledVideo[];
   onScrollEnable: (v: boolean) => void;
-  renderItem: (item: ScheduledVideo) => React.ReactNode;
+  renderItem: (item: ScheduledVideo, isDragging: boolean) => React.ReactNode;
   onReorder: (newOrder: ScheduledVideo[]) => void;
 }) => {
   const [orderedIds, setOrderedIds] = useState(() => items.map(i => i.id));
-  const dragY        = useRef(new Animated.Value(0)).current;
-  const draggingIdx  = useRef<number | null>(null);
-  const [activeIdx, setActiveIdx] = useState<number | null>(null);
+  const [activeId,   setActiveId]   = useState<string | null>(null);
 
-  // Sync IDs when items are added or removed externally (not from reorder)
+  const dragY         = useRef(new Animated.Value(0)).current;
+  const draggingId    = useRef<string | null>(null);
+  const isDraggingRef = useRef(false);
+  const lastGestureY  = useRef(0);
+
+  const orderedIdsRef = useRef(orderedIds);
+  useEffect(() => { orderedIdsRef.current = orderedIds; }, [orderedIds]);
+
+  const scaleAnims = useRef<Record<string, Animated.Value>>({});
+  const shakeAnims = useRef<Record<string, Animated.Value>>({});
+
+  const getScaleAnim = (id: string) => {
+    if (!scaleAnims.current[id]) scaleAnims.current[id] = new Animated.Value(1);
+    return scaleAnims.current[id];
+  };
+  const getShakeAnim = (id: string) => {
+    if (!shakeAnims.current[id]) shakeAnims.current[id] = new Animated.Value(0);
+    return shakeAnims.current[id];
+  };
+
   useEffect(() => {
     const incomingIds = items.map(i => i.id);
     const sameSet =
@@ -172,78 +254,125 @@ const DraggableList = ({
 
   const getById = (id: string) => items.find(i => i.id === id)!;
 
-  const makeHandlers = (index: number) =>
+  const triggerShake = (id: string) => {
+    const anim = getShakeAnim(id);
+    anim.setValue(0);
+    Animated.sequence([
+      Animated.timing(anim, { toValue:  4, duration: 50, useNativeDriver: true }),
+      Animated.timing(anim, { toValue: -4, duration: 50, useNativeDriver: true }),
+      Animated.timing(anim, { toValue:  3, duration: 40, useNativeDriver: true }),
+      Animated.timing(anim, { toValue:  0, duration: 40, useNativeDriver: true }),
+    ]).start();
+  };
+
+  const activateDrag = (id: string) => {
+    if (isDraggingRef.current) return;
+    isDraggingRef.current = true;
+    draggingId.current    = id;
+    lastGestureY.current  = 0;
+    dragY.setValue(0);
+    onScrollEnable(false);
+    setActiveId(id);
+    Animated.spring(getScaleAnim(id), {
+      toValue: 1.05,
+      useNativeDriver: true,
+      bounciness: 8,
+    }).start();
+  };
+
+  const finishDrag = (id: string, finalDy: number) => {
+    if (!isDraggingRef.current) return;
+    isDraggingRef.current = false;
+
+    const ids  = orderedIdsRef.current;
+    const from = ids.indexOf(id);
+    const delta = Math.round(finalDy / CARD_HEIGHT);
+    const to   = Math.max(0, Math.min(ids.length - 1, from + delta));
+
+    Animated.spring(getScaleAnim(id), {
+      toValue: 1,
+      useNativeDriver: true,
+      bounciness: 4,
+    }).start();
+
+    dragY.setValue(0);
+    draggingId.current = null;
+    setActiveId(null);
+    onScrollEnable(true);
+
+    if (to !== from) {
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      setOrderedIds(prev => {
+        const next = [...prev];
+        const [moved] = next.splice(from, 1);
+        next.splice(to, 0, moved);
+        onReorder(next.map(id2 => items.find(i => i.id === id2)!).filter(Boolean));
+        return next;
+      });
+    }
+  };
+
+  // Shared PanResponder — only activates movement after isDraggingRef is true
+  const sharedPanResponder = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: () => false,
-      onMoveShouldSetPanResponder: (_, g) =>
-        Math.abs(g.dy) > 8 && Math.abs(g.dy) > Math.abs(g.dx) * 1.5,
-      onPanResponderGrant: () => {
-        draggingIdx.current = index;
-        dragY.setValue(0);
-        setActiveIdx(index);
-        onScrollEnable(false);
+      onMoveShouldSetPanResponder: () => isDraggingRef.current,
+      onMoveShouldSetPanResponderCapture: () => isDraggingRef.current,
+      onPanResponderMove: (_, g) => {
+        if (!isDraggingRef.current || !draggingId.current) return;
+        dragY.setValue(g.dy);
+        lastGestureY.current = g.dy;
+        const ids  = orderedIdsRef.current;
+        const from = ids.indexOf(draggingId.current);
+        const rawTo = from + Math.round(g.dy / CARD_HEIGHT);
+        const to    = Math.max(0, Math.min(ids.length - 1, rawTo));
+        if (to !== from) triggerShake(ids[to]);
       },
-      onPanResponderMove: Animated.event([null, { dy: dragY }], { useNativeDriver: false }),
-      onPanResponderRelease: (_, g) => {
-        const from  = draggingIdx.current!;
-        const delta = Math.round(g.dy / CARD_HEIGHT);
-        const to    = Math.max(0, Math.min(orderedIds.length - 1, from + delta));
-
-        dragY.setValue(0);
-        draggingIdx.current = null;
-        setActiveIdx(null);
-        onScrollEnable(true);
-
-        if (to !== from) {
-          LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-          const next = [...orderedIds];
-          const [moved] = next.splice(from, 1);
-          next.splice(to, 0, moved);
-          setOrderedIds(next);
-          onReorder(next.map(getById).filter(Boolean));
-        }
+      onPanResponderRelease: () => {
+        if (!isDraggingRef.current || !draggingId.current) return;
+        finishDrag(draggingId.current, lastGestureY.current);
       },
       onPanResponderTerminate: () => {
-        dragY.setValue(0);
-        draggingIdx.current = null;
-        setActiveIdx(null);
-        onScrollEnable(true);
+        if (!isDraggingRef.current || !draggingId.current) return;
+        finishDrag(draggingId.current, lastGestureY.current);
       },
-    }).panHandlers;
+    })
+  ).current;
 
   return (
     <View>
-      {orderedIds.map((id, index) => {
-        const item      = getById(id);
+      {orderedIds.map((id) => {
+        const item       = getById(id);
         if (!item) return null;
-        const isDragging = activeIdx === index;
-        const handlers   = makeHandlers(index);
+        const isDragging = activeId === id;
+        const scaleAnim  = getScaleAnim(id);
+        const shakeAnim  = getShakeAnim(id);
 
         return (
           <Animated.View
             key={id}
-            style={isDragging && {
-              transform: [{ translateY: dragY }],
-              zIndex: 999,
-              shadowColor: '#000',
-              shadowOpacity: 0.18,
-              shadowRadius: 10,
-              elevation: 8,
-            }}
+            style={[
+              s.draggableItem,
+              isDragging && s.draggableItemLifted,
+              {
+                transform: [
+                  { translateY: isDragging ? dragY : 0 },
+                  { scale: scaleAnim },
+                  { translateX: shakeAnim },
+                ],
+              },
+            ]}
           >
-            <View style={s.draggableRow}>
-              {/* Only the handle area captures the vertical pan */}
-              <View style={s.dragHandleArea} {...handlers}>
-                <Ionicons
-                  name="ellipsis-vertical"
-                  size={16}
-                  color={item.isPaused ? colors.border : colors.textLight}
-                />
-              </View>
-              <View style={s.draggableContent}>
-                {renderItem(item)}
-              </View>
-            </View>
+            <Pressable
+              onLongPress={() => activateDrag(id)}
+              delayLongPress={LONG_PRESS_MS}
+              android_disableSound
+              {...sharedPanResponder.panHandlers}
+            >
+              {isDragging
+                ? renderItem(item, true)
+                : renderItem(item, false)
+              }
+            </Pressable>
           </Animated.View>
         );
       })}
@@ -251,17 +380,11 @@ const DraggableList = ({
   );
 };
 
-// ─── Upcoming card — defined outside HomeScreen to prevent remount flicker ────
+// ─── Upcoming card ────────────────────────────────────────────────────────────
 const UpcomingCard = ({
-  video,
-  onEdit,
-  onPlayback,
-  onDelete,
+  video, onEdit, onPlayback, onDelete,
 }: {
-  video: ScheduledVideo;
-  onEdit: () => void;
-  onPlayback: () => void;
-  onDelete: () => void;
+  video: ScheduledVideo; onEdit: () => void; onPlayback: () => void; onDelete: () => void;
 }) => {
   const date        = new Date(video.scheduledFor!);
   const hasRepeat   = video.repeat && video.repeat !== 'never';
@@ -305,7 +428,7 @@ const UpcomingCard = ({
   );
 };
 
-// ─── How It Works — static, defined outside ───────────────────────────────────
+// ─── How It Works ─────────────────────────────────────────────────────────────
 const HOW_STEPS = [
   { n: '1', title: 'Record your video', desc: 'Capture a motivational message for your future self' },
   { n: '2', title: 'Set when to play',  desc: 'Choose a date/time or link it to an app opening' },
@@ -316,9 +439,7 @@ const HowItWorks = () => (
     <Text style={s.howTitle}>How it works</Text>
     {HOW_STEPS.map(step => (
       <View key={step.n} style={s.step}>
-        <View style={s.stepCircle}>
-          <Text style={s.stepNum}>{step.n}</Text>
-        </View>
+        <View style={s.stepCircle}><Text style={s.stepNum}>{step.n}</Text></View>
         <View style={s.stepTextBlock}>
           <Text style={s.stepTitle}>{step.title}</Text>
           <Text style={s.stepDesc}>{step.desc}</Text>
@@ -331,13 +452,19 @@ const HowItWorks = () => (
 // ─── HomeScreen ───────────────────────────────────────────────────────────────
 export function HomeScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
-  const [videos, setVideos]             = useState<ScheduledVideo[]>([]);
-  const [deleteId, setDeleteId]         = useState<string | null>(null);
+  const [videos, setVideos]               = useState<ScheduledVideo[]>([]);
+  const [deleteId, setDeleteId]           = useState<string | null>(null);
   const [scrollEnabled, setScrollEnabled] = useState(true);
+  const [closeSignal, setCloseSignal]     = useState(0);
   const { alertConfig, showAlert, hideAlert } = useBrandAlert();
 
   useFocusEffect(
-    useCallback(() => { getVideos().then(setVideos); }, [])
+    useCallback(() => {
+      getVideos().then(setVideos);
+      checkScheduledVideos().then(triggered => {
+        if (triggered) navigation.navigate('Playback', { videoId: triggered.id, isTriggered: true });
+      });
+    }, [navigation])
   );
 
   const reload = () => getVideos().then(setVideos);
@@ -381,147 +508,119 @@ export function HomeScreen({ navigation }: Props) {
 
   const handleReorderScheduled = async (newOrder: ScheduledVideo[]) => {
     const appVids = videos.filter(v => !!v.appTrigger);
-    const full    = upcomingVideo
-      ? [upcomingVideo, ...newOrder, ...appVids]
-      : [...newOrder, ...appVids];
+    const full    = upcomingVideo ? [upcomingVideo, ...newOrder, ...appVids] : [...newOrder, ...appVids];
     setVideos(full);
     await saveVideos(full);
   };
 
   const handleReorderApp = async (newOrder: ScheduledVideo[]) => {
-    const datetimeVids = videos.filter(v => !v.appTrigger);
-    const full = [...datetimeVids, ...newOrder];
+    const full = [...videos.filter(v => !v.appTrigger), ...newOrder];
     setVideos(full);
     await saveVideos(full);
   };
 
-  // ── Datetime card renderer ───────────────────────────────────────────────────
-  const renderDatetimeCard = useCallback((video: ScheduledVideo) => {
+  const renderDatetimeCard = useCallback((video: ScheduledVideo, isDragging: boolean) => {
     const trigger  = formatDatetimeTrigger(video);
     const isPaused = !!video.isPaused;
-    return (
-      <SwipeableCard onDelete={() => setDeleteId(video.id)}>
+    const card = (
+      <TouchableOpacity
+        style={[s.card, isPaused && s.cardPaused]}
+        onPress={() => navigation.navigate('Edit', { videoId: video.id })}
+        activeOpacity={1}
+      >
         <TouchableOpacity
-          style={[s.card, isPaused && s.cardPaused]}
-          onPress={() => navigation.navigate('Edit', { videoId: video.id })}
-          activeOpacity={0.9}
+          style={s.thumbnail}
+          onPress={() => navigation.navigate('Playback', { videoId: video.id, isTriggered: false })}
+          activeOpacity={0.85}
         >
-          <TouchableOpacity
-            style={s.thumbnail}
-            onPress={() => navigation.navigate('Playback', { videoId: video.id, isTriggered: false })}
-            activeOpacity={0.85}
-          >
-            {video.thumbnail ? (
-              <Image source={{ uri: video.thumbnail }} style={StyleSheet.absoluteFill} resizeMode="cover" />
-            ) : (
-              <View style={[StyleSheet.absoluteFill, s.thumbnailPlaceholder]}>
-                <Ionicons name="videocam" size={22} color="#fff" />
-              </View>
-            )}
-            {isPaused && <View style={s.pausedOverlay} />}
-            <View style={s.durationBadge}>
-              <Text style={s.durationText}>{formatDuration(video.duration)}</Text>
+          {video.thumbnail ? (
+            <Image source={{ uri: video.thumbnail }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+          ) : (
+            <View style={[StyleSheet.absoluteFill, s.thumbnailPlaceholder]}>
+              <Ionicons name="videocam" size={22} color="#fff" />
             </View>
-            <View style={s.playOverlay}>
-              <Ionicons name="play" size={18} color={isPaused ? 'rgba(255,255,255,0.45)' : '#fff'} />
-            </View>
-          </TouchableOpacity>
-
-          <View style={s.info}>
-            <Text style={[s.cardTitle, isPaused && s.textMuted]} numberOfLines={1}>{video.title}</Text>
-            {video.message
-              ? <Text style={[s.cardMessage, isPaused && s.textMuted]} numberOfLines={2}>{video.message}</Text>
-              : null}
-            <View style={s.triggerRow}>
-              <Ionicons
-                name={trigger.icon} size={12}
-                color={isPaused ? colors.border : (trigger.isPast ? colors.textLight : colors.danger)}
-              />
-              <Text
-                style={[s.triggerText, { color: isPaused ? colors.border : (trigger.isPast ? colors.textLight : colors.danger) }]}
-                numberOfLines={1}
-              >
-                {trigger.text}
-              </Text>
-            </View>
-          </View>
-
-          <View style={s.cardRight}>
-            <AlarmToggle value={!isPaused} onValueChange={() => handleTogglePaused(video)} />
+          )}
+          {isPaused && <View style={s.pausedOverlay} />}
+          <View style={s.durationBadge}><Text style={s.durationText}>{formatDuration(video.duration)}</Text></View>
+          <View style={s.playOverlay}>
+            <Ionicons name="play" size={18} color={isPaused ? 'rgba(255,255,255,0.45)' : '#fff'} />
           </View>
         </TouchableOpacity>
+        <View style={s.info}>
+          <Text style={[s.cardTitle, isPaused && s.textMuted]} numberOfLines={1}>{video.title}</Text>
+          {video.message ? <Text style={[s.cardMessage, isPaused && s.textMuted]} numberOfLines={2}>{video.message}</Text> : null}
+          <View style={s.triggerRow}>
+            <Ionicons name={trigger.icon} size={12} color={isPaused ? colors.border : (trigger.isPast ? colors.textLight : colors.danger)} />
+            <Text style={[s.triggerText, { color: isPaused ? colors.border : (trigger.isPast ? colors.textLight : colors.danger) }]} numberOfLines={1}>
+              {trigger.text}
+            </Text>
+          </View>
+        </View>
+        <View style={s.cardRight}>
+          <AlarmToggle value={!isPaused} onValueChange={() => handleTogglePaused(video)} />
+        </View>
+      </TouchableOpacity>
+    );
+    if (isDragging) return card;
+    return (
+      <SwipeableCard onDelete={() => setDeleteId(video.id)} freeze={deleteId === video.id} closeSignal={closeSignal}>
+        {card}
       </SwipeableCard>
     );
-  }, [videos, navigation]);
+  }, [videos, navigation, deleteId, closeSignal]);
 
-  // ── App trigger card renderer ────────────────────────────────────────────────
-  const renderAppCard = useCallback((video: ScheduledVideo) => {
+  const renderAppCard = useCallback((video: ScheduledVideo, isDragging: boolean) => {
     const isPaused   = !!video.isPaused;
     const hasPlayed  = !!video.appTrigger?.hasPlayed;
     const isPlayOnce = !!video.appTrigger?.playOnce;
-
-    return (
-      <SwipeableCard onDelete={() => setDeleteId(video.id)}>
+    const card = (
+      <TouchableOpacity
+        style={[s.card, isPaused && s.cardPaused]}
+        onPress={() => navigation.navigate('Edit', { videoId: video.id })}
+        activeOpacity={1}
+      >
         <TouchableOpacity
-          style={[s.card, isPaused && s.cardPaused]}
-          onPress={() => navigation.navigate('Edit', { videoId: video.id })}
-          activeOpacity={0.9}
+          style={s.thumbnail}
+          onPress={() => navigation.navigate('Playback', { videoId: video.id, isTriggered: false })}
+          activeOpacity={0.85}
         >
-          <TouchableOpacity
-            style={s.thumbnail}
-            onPress={() => navigation.navigate('Playback', { videoId: video.id, isTriggered: false })}
-            activeOpacity={0.85}
-          >
-            {video.thumbnail ? (
-              <Image source={{ uri: video.thumbnail }} style={StyleSheet.absoluteFill} resizeMode="cover" />
-            ) : (
-              <View style={[StyleSheet.absoluteFill, s.thumbnailPlaceholder]}>
-                <Ionicons name="videocam" size={22} color="#fff" />
-              </View>
-            )}
-            {isPaused && <View style={s.pausedOverlay} />}
-            <View style={s.durationBadge}>
-              <Text style={s.durationText}>{formatDuration(video.duration)}</Text>
+          {video.thumbnail ? (
+            <Image source={{ uri: video.thumbnail }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+          ) : (
+            <View style={[StyleSheet.absoluteFill, s.thumbnailPlaceholder]}>
+              <Ionicons name="videocam" size={22} color="#fff" />
             </View>
-            <View style={s.playOverlay}>
-              <Ionicons name="play" size={18} color={isPaused ? 'rgba(255,255,255,0.45)' : '#fff'} />
-            </View>
-          </TouchableOpacity>
-
-          <View style={s.info}>
-            <Text style={[s.cardTitle, isPaused && s.textMuted]} numberOfLines={1}>{video.title}</Text>
-            {video.message
-              ? <Text style={[s.cardMessage, isPaused && s.textMuted]} numberOfLines={2}>{video.message}</Text>
-              : null}
-            <View style={s.triggerRow}>
-              <Ionicons
-                name="phone-portrait-outline" size={12}
-                color={isPaused ? colors.border : (hasPlayed ? colors.textLight : colors.danger)}
-              />
-              <Text
-                style={[s.triggerText, { color: isPaused ? colors.border : (hasPlayed ? colors.textLight : colors.danger) }]}
-                numberOfLines={1}
-              >
-                {video.appTrigger?.appName} · {isPlayOnce ? 'Once' : 'Always'}
-              </Text>
-            </View>
-            {isPaused && !isPlayOnce && (
-              <View style={s.pausedBadge}><Text style={s.pausedBadgeText}>Paused</Text></View>
-            )}
-            {isPlayOnce && hasPlayed && (
-              <View style={s.playedBadge}><Text style={s.playedBadgeText}>Played</Text></View>
-            )}
-          </View>
-
-          <View style={s.cardRight}>
-            {!isPlayOnce && (
-              <AlarmToggle value={!isPaused} onValueChange={() => handleTogglePaused(video)} />
-            )}
+          )}
+          {isPaused && <View style={s.pausedOverlay} />}
+          <View style={s.durationBadge}><Text style={s.durationText}>{formatDuration(video.duration)}</Text></View>
+          <View style={s.playOverlay}>
+            <Ionicons name="play" size={18} color={isPaused ? 'rgba(255,255,255,0.45)' : '#fff'} />
           </View>
         </TouchableOpacity>
+        <View style={s.info}>
+          <Text style={[s.cardTitle, isPaused && s.textMuted]} numberOfLines={1}>{video.title}</Text>
+          {video.message ? <Text style={[s.cardMessage, isPaused && s.textMuted]} numberOfLines={2}>{video.message}</Text> : null}
+          <View style={s.triggerRow}>
+            <Ionicons name="phone-portrait-outline" size={12} color={isPaused ? colors.border : (hasPlayed ? colors.textLight : colors.danger)} />
+            <Text style={[s.triggerText, { color: isPaused ? colors.border : (hasPlayed ? colors.textLight : colors.danger) }]} numberOfLines={1}>
+              {video.appTrigger?.appName} · {isPlayOnce ? 'Once' : 'Always'}
+            </Text>
+          </View>
+          {isPaused && !isPlayOnce && <View style={s.pausedBadge}><Text style={s.pausedBadgeText}>Paused</Text></View>}
+          {isPlayOnce && hasPlayed && <View style={s.playedBadge}><Text style={s.playedBadgeText}>Played</Text></View>}
+        </View>
+        <View style={s.cardRight}>
+          {!isPlayOnce && <AlarmToggle value={!isPaused} onValueChange={() => handleTogglePaused(video)} />}
+        </View>
+      </TouchableOpacity>
+    );
+    if (isDragging) return card;
+    return (
+      <SwipeableCard onDelete={() => setDeleteId(video.id)} freeze={deleteId === video.id} closeSignal={closeSignal}>
+        {card}
       </SwipeableCard>
     );
-  }, [videos, navigation]);
+  }, [videos, navigation, deleteId, closeSignal]);
 
   const hasAnyVideos = videos.length > 0;
 
@@ -532,30 +631,19 @@ export function HomeScreen({ navigation }: Props) {
           <Text style={s.appName}>Past.Self.</Text>
           <Text style={s.tagline}>Messages from your past to your future</Text>
         </View>
-        <TouchableOpacity
-          style={s.recordBtn}
-          onPress={() => navigation.navigate('Record', { prefill: undefined })}
-          activeOpacity={0.85}
-        >
+        <TouchableOpacity style={s.recordBtn} onPress={() => navigation.navigate('Record', { prefill: undefined })} activeOpacity={0.85}>
           <Ionicons name="add" size={18} color="#fff" />
           <Text style={s.recordBtnText}>Record</Text>
         </TouchableOpacity>
       </View>
 
       {!hasAnyVideos ? (
-        // Empty: fills screen, no scroll, HowItWorks visible below button
         <View style={s.emptyOuter}>
           <View style={s.emptyInner}>
             <View style={s.emptyIcon}><ClockIcon /></View>
             <Text style={s.emptyTitle}>No videos yet</Text>
-            <Text style={s.emptyBody}>
-              {'Record your first message to your future self —\na reminder, a push, a promise.'}
-            </Text>
-            <TouchableOpacity
-              style={s.emptyButton}
-              onPress={() => navigation.navigate('Record', { prefill: undefined })}
-              activeOpacity={0.85}
-            >
+            <Text style={s.emptyBody}>{'Record your first message to your future self —\na reminder, a push, a promise.'}</Text>
+            <TouchableOpacity style={s.emptyButton} onPress={() => navigation.navigate('Record', { prefill: undefined })} activeOpacity={0.85}>
               <Ionicons name="add" size={20} color="#fff" />
               <Text style={s.emptyButtonText}>Get Started</Text>
             </TouchableOpacity>
@@ -568,6 +656,7 @@ export function HomeScreen({ navigation }: Props) {
           contentContainerStyle={s.scrollContent}
           showsVerticalScrollIndicator={false}
           scrollEnabled={scrollEnabled}
+          onScrollBeginDrag={() => setCloseSignal(n => n + 1)}
         >
           {upcomingVideo && (
             <View style={s.section}>
@@ -579,31 +668,18 @@ export function HomeScreen({ navigation }: Props) {
               />
             </View>
           )}
-
           {scheduledDatetimeVideos.length > 0 && (
             <View style={s.section}>
               <Text style={s.sectionTitle}>Scheduled</Text>
-              <DraggableList
-                items={scheduledDatetimeVideos}
-                onScrollEnable={setScrollEnabled}
-                renderItem={renderDatetimeCard}
-                onReorder={handleReorderScheduled}
-              />
+              <DraggableList items={scheduledDatetimeVideos} onScrollEnable={setScrollEnabled} renderItem={renderDatetimeCard} onReorder={handleReorderScheduled} />
             </View>
           )}
-
           {appTriggerVideos.length > 0 && (
             <View style={s.section}>
               <Text style={s.sectionTitle}>App Triggers</Text>
-              <DraggableList
-                items={appTriggerVideos}
-                onScrollEnable={setScrollEnabled}
-                renderItem={renderAppCard}
-                onReorder={handleReorderApp}
-              />
+              <DraggableList items={appTriggerVideos} onScrollEnable={setScrollEnabled} renderItem={renderAppCard} onReorder={handleReorderApp} />
             </View>
           )}
-
           <HowItWorks />
         </ScrollView>
       )}
@@ -611,9 +687,7 @@ export function HomeScreen({ navigation }: Props) {
       {deleteId && (
         <View style={s.modalOverlay}>
           <View style={s.modal}>
-            <View style={s.modalIcon}>
-              <Ionicons name="trash-outline" size={22} color={colors.danger} />
-            </View>
+            <View style={s.modalIcon}><Ionicons name="trash-outline" size={22} color={colors.danger} /></View>
             <Text style={s.modalTitle}>Delete this video?</Text>
             <Text style={s.modalBody}>This message from your past self will be permanently removed.</Text>
             <View style={s.modalButtons}>
@@ -636,7 +710,6 @@ export function HomeScreen({ navigation }: Props) {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const s = StyleSheet.create({
   outerContainer: { flex: 1, backgroundColor: colors.card },
-
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: spacing.md, paddingVertical: spacing.md,
@@ -644,20 +717,12 @@ const s = StyleSheet.create({
   },
   appName:       { fontFamily: fonts.brittany, fontSize: 36, color: colors.text },
   tagline:       { fontFamily: fonts.inter, fontSize: 11, color: colors.textLight },
-  recordBtn:     {
-    flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
-    backgroundColor: colors.danger, borderRadius: radius.md,
-    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
-  },
+  recordBtn:     { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, backgroundColor: colors.danger, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   recordBtnText: { fontFamily: fonts.montserratBold, fontSize: 14, color: '#fff' },
 
-  // Empty state
-  emptyOuter:  { flex: 1, backgroundColor: colors.background, paddingHorizontal: spacing.md, paddingBottom: spacing.md },
-  emptyInner:  { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  emptyIcon:   {
-    width: 96, height: 96, borderRadius: 48, backgroundColor: colors.card,
-    alignItems: 'center', justifyContent: 'center', marginBottom: spacing.lg,
-  },
+  emptyOuter:      { flex: 1, backgroundColor: colors.background, paddingHorizontal: spacing.md, paddingBottom: spacing.xxl },
+  emptyInner:      { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  emptyIcon:       { width: 96, height: 96, borderRadius: 48, backgroundColor: colors.card, alignItems: 'center', justifyContent: 'center', marginBottom: spacing.lg },
   emptyTitle:      { fontFamily: fonts.montserratBold, fontSize: 20, color: colors.text, marginBottom: spacing.sm },
   emptyBody:       { fontFamily: fonts.inter, fontSize: 13, color: colors.text, textAlign: 'center', marginBottom: spacing.lg, lineHeight: 20 },
   emptyButton:     { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, backgroundColor: colors.danger, borderRadius: radius.md, paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
@@ -668,42 +733,43 @@ const s = StyleSheet.create({
   section:       { marginBottom: spacing.md },
   sectionTitle:  { fontFamily: fonts.montserratBold, fontSize: 15, color: colors.text, marginBottom: spacing.sm },
 
-  // Upcoming card
-  upcomingCard: {
-    backgroundColor: colors.card, borderRadius: radius.lg, overflow: 'hidden',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08, shadowRadius: 6, elevation: 3,
-    borderWidth: 1.5, borderColor: '#9898d620',
-  },
+  upcomingCard:     { backgroundColor: colors.card, borderRadius: radius.lg, overflow: 'hidden', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 6, elevation: 3, borderWidth: 1.5, borderColor: '#9898d620' },
   upcomingThumb:    { width: '100%', height: 160, backgroundColor: colors.accent },
   playOverlayLarge: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.2)', alignItems: 'center', justifyContent: 'center' },
-  upcomingBadge: {
-    position: 'absolute', top: spacing.sm, left: spacing.sm,
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: radius.full,
-    paddingHorizontal: spacing.sm, paddingVertical: 3,
-  },
-  upcomingDot:       { width: 6, height: 6, borderRadius: 3, backgroundColor: '#9898d6' },
-  upcomingBadgeText: { fontFamily: fonts.montserratBold, fontSize: 11, color: '#fff' },
-  upcomingInfo:      { flexDirection: 'row', alignItems: 'center', padding: spacing.md, gap: spacing.sm },
-  upcomingInfoLeft:  { flex: 1 },
-  upcomingTitle:     { fontFamily: fonts.montserratBold, fontSize: 15, color: colors.text, marginBottom: 2 },
-  upcomingNote:      { fontFamily: fonts.inter, fontSize: 12, color: colors.textLight, marginBottom: 3 },
+  upcomingBadge:    { position: 'absolute', top: spacing.sm, left: spacing.sm, flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: radius.full, paddingHorizontal: spacing.sm, paddingVertical: 3 },
+  upcomingDot:      { width: 6, height: 6, borderRadius: 3, backgroundColor: '#9898d6' },
+  upcomingBadgeText:{ fontFamily: fonts.montserratBold, fontSize: 11, color: '#fff' },
+  upcomingInfo:     { flexDirection: 'row', alignItems: 'center', padding: spacing.md, gap: spacing.sm },
+  upcomingInfoLeft: { flex: 1 },
+  upcomingTitle:    { fontFamily: fonts.montserratBold, fontSize: 15, color: colors.text, marginBottom: 2 },
+  upcomingNote:     { fontFamily: fonts.inter, fontSize: 12, color: colors.textLight, marginBottom: 3 },
 
-  // Swipe-to-delete
+  // Swipe container: red background = the delete zone colour
+  // The card's white background covers it at rest; cover view maintains cover during transitions
   swipeContainer: {
-    borderRadius: radius.lg, overflow: 'hidden', marginBottom: spacing.sm,
+    marginBottom: spacing.sm,
+    borderRadius: radius.lg,
+    overflow: 'hidden',
+    backgroundColor: colors.danger,
   },
-  deleteZone:      { position: 'absolute', top: 0, bottom: 0, right: 0, width: DELETE_ZONE_WIDTH, backgroundColor: colors.danger, alignItems: 'center', justifyContent: 'center' },
+  deleteZone:      { position: 'absolute', top: 0, bottom: 0, right: 0, width: DELETE_ZONE_WIDTH, alignItems: 'center', justifyContent: 'center' },
   deleteAction:    { alignItems: 'center', gap: 3 },
   deleteActionText:{ fontFamily: fonts.montserratBold, fontSize: 11, color: '#fff' },
 
-  // Draggable row
-  draggableRow:    { flexDirection: 'row', alignItems: 'center' },
-  dragHandleArea:  { paddingHorizontal: spacing.xs, paddingVertical: spacing.md, alignItems: 'center', justifyContent: 'center' },
-  draggableContent:{ flex: 1 },
+  // Cover: sits on right edge of the card, slides right as card slides left
+  // Colour matches scroll background so delete zone stays invisible at rest
+  deleteZoneCover: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    right: -DELETE_ZONE_WIDTH,
+    width: DELETE_ZONE_WIDTH,
+    backgroundColor: colors.background,
+  },
 
-  // Card
+  draggableItem:       { marginBottom: spacing.sm, borderRadius: radius.lg },
+  draggableItemLifted: { zIndex: 999, shadowColor: '#000', shadowOpacity: 0.22, shadowRadius: 12, elevation: 10 },
+
   card: {
     flexDirection: 'row', backgroundColor: colors.card,
     borderRadius: radius.lg, padding: spacing.sm,
@@ -711,47 +777,41 @@ const s = StyleSheet.create({
     shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05, shadowRadius: 3, elevation: 2,
   },
-  cardPaused: { opacity: 0.38 },
+  cardPaused:           { opacity: 0.38 },
+  thumbnail:            { width: 80, height: 80, borderRadius: radius.md, backgroundColor: colors.accent, overflow: 'hidden', flexShrink: 0 },
+  thumbnailPlaceholder: { backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' },
+  pausedOverlay:        { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(255,255,255,0.3)' },
+  playOverlay:          { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.18)' },
+  durationBadge:        { position: 'absolute', bottom: 4, right: 4, backgroundColor: 'rgba(0,0,0,0.7)', borderRadius: 4, paddingHorizontal: 5, paddingVertical: 2 },
+  durationText:         { color: '#fff', fontSize: 10, fontFamily: fonts.inter },
 
-  thumbnail:           { width: 80, height: 80, borderRadius: radius.md, backgroundColor: colors.accent, overflow: 'hidden', flexShrink: 0 },
-  thumbnailPlaceholder:{ backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' },
-  pausedOverlay:       { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(255,255,255,0.3)' },
-  playOverlay:         { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.18)' },
-  durationBadge:       { position: 'absolute', bottom: 4, right: 4, backgroundColor: 'rgba(0,0,0,0.7)', borderRadius: 4, paddingHorizontal: 5, paddingVertical: 2 },
-  durationText:        { color: '#fff', fontSize: 10, fontFamily: fonts.inter },
-
-  info:       { flex: 1, minWidth: 0 },
-  cardTitle:  { fontFamily: fonts.montserratBold, fontSize: 13, color: colors.text, marginBottom: 2 },
-  cardMessage:{ fontFamily: fonts.inter, fontSize: 11, color: colors.textLight, marginBottom: 4 },
-  textMuted:  { color: colors.textLight },
-  triggerRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  triggerText:{ fontFamily: fonts.inter, fontSize: 11, flex: 1 },
+  info:        { flex: 1, minWidth: 0 },
+  cardTitle:   { fontFamily: fonts.montserratBold, fontSize: 13, color: colors.text, marginBottom: 2 },
+  cardMessage: { fontFamily: fonts.inter, fontSize: 11, color: colors.textLight, marginBottom: 4 },
+  textMuted:   { color: colors.textLight },
+  triggerRow:  { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  triggerText: { fontFamily: fonts.inter, fontSize: 11, flex: 1 },
 
   pausedBadge:     { alignSelf: 'flex-start', marginTop: 4, backgroundColor: '#9898d620', borderRadius: radius.sm, paddingHorizontal: spacing.sm, paddingVertical: 2 },
   pausedBadgeText: { fontFamily: fonts.montserratBold, fontSize: 10, color: '#9898d6' },
   playedBadge:     { alignSelf: 'flex-start', marginTop: 4, backgroundColor: colors.border, borderRadius: radius.sm, paddingHorizontal: spacing.sm, paddingVertical: 2 },
   playedBadgeText: { fontFamily: fonts.inter, fontSize: 10, color: colors.textLight },
 
-  // Toggle column — vertically centred in card
-  cardRight: { alignItems: 'center', justifyContent: 'center', alignSelf: 'stretch', paddingLeft: spacing.xs },
+  cardRight:    { alignItems: 'center', justifyContent: 'center', alignSelf: 'stretch', paddingLeft: spacing.xs },
+  toggleTrack:  { width: 46, height: 26, borderRadius: 13, justifyContent: 'center' },
+  toggleTrackOn:{ backgroundColor: colors.danger },
+  toggleTrackOff:{ backgroundColor: '#d1d5db' },
+  toggleThumb:  { width: 22, height: 22, borderRadius: 11, backgroundColor: '#fff', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.2, shadowRadius: 2, elevation: 2 },
 
-  // Toggle
-  toggleTrack:    { width: 46, height: 26, borderRadius: 13, justifyContent: 'center' },
-  toggleTrackOn:  { backgroundColor: colors.danger },
-  toggleTrackOff: { backgroundColor: '#d1d5db' },
-  toggleThumb:    { width: 22, height: 22, borderRadius: 11, backgroundColor: '#fff', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.2, shadowRadius: 2, elevation: 2 },
-
-  // How it works — FIX: flex:1 on text block so it never clips
-  howItWorks:  { backgroundColor: colors.card, borderRadius: radius.lg, padding: spacing.lg, marginTop: spacing.md },
-  howTitle:    { fontFamily: fonts.montserratBold, fontSize: 16, color: colors.text, marginBottom: spacing.lg },
-  step:        { flexDirection: 'row', alignItems: 'flex-start', marginBottom: spacing.md },
-  stepCircle:  { width: 32, height: 32, borderRadius: 16, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center', marginRight: spacing.md, flexShrink: 0 },
-  stepNum:     { fontFamily: fonts.montserratBold, fontSize: 14, color: '#fff' },
+  howItWorks:    { backgroundColor: colors.card, borderRadius: radius.lg, padding: spacing.lg, marginTop: spacing.md, marginBottom: spacing.lg, alignSelf: 'center', width: '88%' },
+  howTitle:      { fontFamily: fonts.montserratBold, fontSize: 16, color: colors.text, marginBottom: spacing.lg },
+  step:          { flexDirection: 'row', alignItems: 'flex-start', marginBottom: spacing.md },
+  stepCircle:    { width: 32, height: 32, borderRadius: 16, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center', marginRight: spacing.md, flexShrink: 0 },
+  stepNum:       { fontFamily: fonts.montserratBold, fontSize: 14, color: '#fff' },
   stepTextBlock: { flex: 1 },
-  stepTitle:   { fontFamily: fonts.montserratMedium, fontSize: 14, color: colors.text },
-  stepDesc:    { fontFamily: fonts.inter, fontSize: 12, color: colors.textLight, marginTop: 2 },
+  stepTitle:     { fontFamily: fonts.montserratMedium, fontSize: 14, color: colors.text },
+  stepDesc:      { fontFamily: fonts.inter, fontSize: 12, color: colors.textLight, marginTop: 2 },
 
-  // Delete modal
   modalOverlay:      { ...StyleSheet.absoluteFillObject, backgroundColor: colors.overlay, alignItems: 'center', justifyContent: 'center', padding: spacing.lg, zIndex: 100 },
   modal:             { backgroundColor: colors.card, borderRadius: radius.xl, padding: spacing.lg, width: '100%', maxWidth: 320 },
   modalIcon:         { width: 48, height: 48, borderRadius: 24, backgroundColor: colors.background, alignItems: 'center', justifyContent: 'center', alignSelf: 'center', marginBottom: spacing.md },

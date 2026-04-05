@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { AppState } from 'react-native';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, NavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
@@ -19,6 +19,7 @@ import { ScheduleScreen } from './src/screens/ScheduleScreen';
 import { PlaybackScreen } from './src/screens/PlaybackScreen';
 import { EditScreen } from './src/screens/EditScreen';
 import { ConfirmationScreen } from './src/screens/ConfirmationScreen';
+import { RepeatOption } from './src/types/video';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -28,7 +29,7 @@ export interface PrefillData {
   message?: string;
   triggerType?: 'datetime' | 'app';
   scheduledFor?: string;
-  repeat?: string;
+  repeat?: RepeatOption;
   appName?: string;
   playOnce?: boolean;
   createdAt?: string;
@@ -53,7 +54,7 @@ export type RootStackParamList = {
     title:        string;
     message?:     string;
     scheduledFor?: string;
-    repeat?:      string;
+    repeat?:      RepeatOption;
     appName?:     string;
     playOnce?:    boolean;
   };
@@ -63,35 +64,27 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export default function App() {
   const [appReady, setAppReady] = useState(false);
-  const [isFirst,  setIsFirst]  = useState(true);
-  const navigationRef = useRef<any>(null);
+  // FIX: isFirst starts as null — we don't render until we know the real value
+  const [isFirst, setIsFirst] = useState<boolean | null>(null);
 
-  // FIX: Helper to safely trigger a playback navigation.
-  // Guards against navigationRef not yet ready (race condition on cold start).
-  const triggerPlayback = (videoId: string) => {
+  const navigationRef = useRef<NavigationContainerRef<RootStackParamList>>(null);
+
+  const triggerPlayback = useCallback((videoId: string) => {
     if (navigationRef.current?.isReady()) {
       navigationRef.current.navigate('Playback', { videoId, isTriggered: true });
     }
-  };
-
-  // FIX: checkScheduledVideos is now a top-level import (no dynamic import inside interval).
-  const checkVideos = useCallback(async () => {
-    const video = await checkScheduledVideos();
-    if (video) {
-      triggerPlayback(video.id);
-    }
   }, []);
 
-  useEffect(() => {
-    // FIX: Call immediately on mount so cold-start triggers fire right away,
-    // not 30 seconds later or only on next foreground.
-    checkVideos();
+  const checkVideos = useCallback(async () => {
+    const video = await checkScheduledVideos();
+    if (video) triggerPlayback(video.id);
+  }, [triggerPlayback]);
 
+  useEffect(() => {
     const interval = setInterval(checkVideos, 30000);
     const sub = AppState.addEventListener('change', state => {
       if (state === 'active') checkVideos();
     });
-
     return () => {
       clearInterval(interval);
       sub.remove();
@@ -109,9 +102,17 @@ export default function App() {
           Inter_500Medium,
         });
         const onboarded = await isOnboarded();
+        // FIX: set isFirst only after async resolution — this is the real value
         setIsFirst(!onboarded);
       } catch (e) {
-        console.warn(e);
+        console.warn('[App] Font loading failed — using system fonts:', e);
+        // FIX: still need to set isFirst even on error so app doesn't hang
+        try {
+          const onboarded = await isOnboarded();
+          setIsFirst(!onboarded);
+        } catch {
+          setIsFirst(false); // safe fallback: treat as returning user
+        }
       } finally {
         setAppReady(true);
       }
@@ -120,10 +121,15 @@ export default function App() {
   }, []);
 
   const onLayoutRootView = useCallback(async () => {
-    if (appReady) await SplashScreen.hideAsync();
+    if (appReady) {
+      await SplashScreen.hideAsync();
+    }
   }, [appReady]);
 
-  if (!appReady) return null;
+  // FIX: Don't render until both fonts are loaded AND we know onboarding state.
+  // Previously isFirst defaulted to `true` and initialParams fired before
+  // isOnboarded() resolved — so returning users always saw the first-time splash.
+  if (!appReady || isFirst === null) return null;
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
@@ -134,6 +140,11 @@ export default function App() {
             initialRouteName="Splash"
             screenOptions={{ headerShown: false, animation: 'fade' }}
           >
+            {/*
+              FIX: Pass isFirstTime via initialParams AFTER async resolution.
+              Because isFirst is now settled before render, initialParams is
+              correct on first mount — no race condition.
+            */}
             <Stack.Screen
               name="Splash"
               component={AppSplash}

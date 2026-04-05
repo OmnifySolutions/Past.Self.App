@@ -46,15 +46,12 @@ export const checkScheduledVideos = async (): Promise<ScheduledVideo | null> => 
   const now = new Date();
 
   for (const video of videos) {
-    // Skip if system-deactivated OR user has manually paused
     if (!video.isActive || video.isPaused) continue;
 
-    // --- Datetime trigger ---
     if (video.scheduledFor) {
       const scheduled = new Date(video.scheduledFor);
       if (scheduled > now) continue;
 
-      // It's due — handle repeat vs one-shot
       if (!video.repeat || video.repeat === 'never') {
         await updateVideo(video.id, { isActive: false });
       } else {
@@ -69,13 +66,8 @@ export const checkScheduledVideos = async (): Promise<ScheduledVideo | null> => 
       return video;
     }
 
-    // --- App trigger (play-once that hasn't played yet) ---
-    // Real app detection is not yet wired; this handles the hasPlayed gate
-    // so that once played via PlaybackScreen, it won't re-queue.
     if (video.appTrigger) {
       if (video.appTrigger.playOnce && video.appTrigger.hasPlayed) continue;
-      // Non-play-once app triggers are handled externally (when app guard fires)
-      // We do NOT auto-trigger them from this scheduler loop.
     }
   }
 

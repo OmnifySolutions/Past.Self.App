@@ -9,9 +9,10 @@ import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as VideoThumbnails from 'expo-video-thumbnails';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as Crypto from 'expo-crypto';
 import { RootStackParamList, PrefillData } from '../../App';
 import { saveVideo } from '../utils/storage';
-import { ScheduledVideo, TriggerType } from '../types/video';
+import { ScheduledVideo, TriggerType, RepeatOption } from '../types/video';
 import { colors, fonts, spacing, radius } from '../styles/theme';
 import { BrandAlert, useBrandAlert } from '../components/BrandAlert';
 import { getRepeatDescription, getNextOccurrence } from '../utils/repeatUtils';
@@ -19,7 +20,7 @@ import { getRepeatDescription, getNextOccurrence } from '../utils/repeatUtils';
 type Props = NativeStackScreenProps<RootStackParamList, 'Schedule'>;
 
 const POPULAR_APPS = ['Instagram','TikTok','Twitter/X','Facebook','Snapchat','LinkedIn','YouTube','Email','Notes'];
-const REPEAT_OPTIONS = [
+const REPEAT_OPTIONS: { label: string; value: RepeatOption }[] = [
   { label: 'Never',    value: 'never'    },
   { label: 'Daily',    value: 'daily'    },
   { label: 'Weekdays', value: 'weekdays' },
@@ -30,9 +31,6 @@ const REPEAT_OPTIONS = [
 
 export function ScheduleScreen({ route, navigation }: Props) {
   const { videoUri, duration, thumbnail, prefill } = route.params;
-
-  // FIX: Replace SafeAreaView (React Native) with useSafeAreaInsets hook.
-  // NEVER use React Native's SafeAreaView — it causes a pink status bar gap on iOS.
   const insets = useSafeAreaInsets();
 
   const [title, setTitle]           = useState(prefill?.title || '');
@@ -40,7 +38,7 @@ export function ScheduleScreen({ route, navigation }: Props) {
   const [triggerType, setTriggerType] = useState<TriggerType>(prefill?.triggerType || 'datetime');
   const [date, setDate]             = useState(prefill?.scheduledFor ? new Date(prefill.scheduledFor) : new Date(Date.now() + 3600000));
   const [showPicker, setShowPicker] = useState(false);
-  const [repeat, setRepeat]         = useState(prefill?.repeat || 'never');
+  const [repeat, setRepeat]         = useState<RepeatOption>(prefill?.repeat || 'never'); // FIX: RepeatOption
   const [selectedApp, setSelectedApp] = useState(prefill?.appName || '');
   const [playOnce, setPlayOnce]     = useState(prefill?.playOnce ?? true);
   const [isSaving, setIsSaving]     = useState(false);
@@ -61,8 +59,10 @@ export function ScheduleScreen({ route, navigation }: Props) {
     createdAt: prefill?.createdAt,
   });
 
+  // FIX: use navigation.replace instead of navigate — removes this Schedule
+  // from the stack so back-press doesn't return here after re-recording.
   const handleReRecord = () => {
-    navigation.navigate('Record', { prefill: buildPrefill() });
+    navigation.replace('Record', { prefill: buildPrefill() });
   };
 
   const handleSave = async () => {
@@ -82,33 +82,33 @@ export function ScheduleScreen({ route, navigation }: Props) {
     setIsSaving(true);
 
     try {
-      const videoId = prefill?.id || Date.now().toString();
+      // FIX: Use randomUUID() instead of Date.now() — eliminates millisecond collision risk
+      const videoId = prefill?.id || Crypto.randomUUID();
       const permanentDir = FileSystem.documentDirectory + 'videos/';
       const thumbnailDir = FileSystem.documentDirectory + 'thumbnails/';
 
       await FileSystem.makeDirectoryAsync(permanentDir,   { intermediates: true });
       await FileSystem.makeDirectoryAsync(thumbnailDir, { intermediates: true });
 
-      // --- Video: copy to permanent storage if not already there ---
+      // FIX: Always copy the video when re-recording — delete old file first if
+      // a previous version exists at the same path, to prevent stale file retention.
       const permanentUri = permanentDir + videoId + '.mp4';
-      if (!videoUri.startsWith(permanentDir)) {
-        await FileSystem.copyAsync({ from: videoUri, to: permanentUri });
+      const existingInfo = await FileSystem.getInfoAsync(permanentUri);
+      if (existingInfo.exists) {
+        await FileSystem.deleteAsync(permanentUri, { idempotent: true });
       }
+      await FileSystem.copyAsync({ from: videoUri, to: permanentUri });
 
-      // --- Thumbnail: generate a real frame from the video, save permanently ---
-      // FIX: The raw camera URI (thumbnail prop) is temporary — iOS deletes it on restart.
-      // We generate a real thumbnail from the permanent video file instead.
       let permanentThumbnail: string | undefined;
       try {
         const { uri: thumbUri } = await VideoThumbnails.getThumbnailAsync(permanentUri, {
-          time: 500, // grab frame at 0.5s
+          time: 500,
           quality: 0.7,
         });
         const permanentThumbPath = thumbnailDir + videoId + '.jpg';
         await FileSystem.copyAsync({ from: thumbUri, to: permanentThumbPath });
         permanentThumbnail = permanentThumbPath;
       } catch (thumbErr) {
-        // Thumbnail generation is non-fatal — video still works without it.
         console.warn('Thumbnail generation failed:', thumbErr);
         permanentThumbnail = undefined;
       }
@@ -116,7 +116,7 @@ export function ScheduleScreen({ route, navigation }: Props) {
       const video: ScheduledVideo = {
         id: videoId,
         videoUri: permanentUri,
-        thumbnail: permanentThumbnail, // FIX: permanent path, not the temp camera URI
+        thumbnail: permanentThumbnail,
         title: title.trim(),
         message: message.trim(),
         createdAt: prefill?.createdAt || new Date().toISOString(),
@@ -132,7 +132,7 @@ export function ScheduleScreen({ route, navigation }: Props) {
 
       navigation.navigate('Confirmation', {
         videoId: video.id,
-        thumbnail: permanentThumbnail || thumbnail, // fallback to original if thumb failed
+        thumbnail: permanentThumbnail || thumbnail,
         title: video.title,
         message: video.message,
         scheduledFor: video.scheduledFor,
@@ -154,11 +154,8 @@ export function ScheduleScreen({ route, navigation }: Props) {
   const nextOccurrence = repeat !== 'never' ? getNextOccurrence(date.toISOString(), repeat) : null;
 
   return (
-    // FIX: paddingTop from insets instead of SafeAreaView from react-native
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
-        {/* FIX: navigation.goBack() instead of navigation.navigate('Home').
-            navigate('Home') was pushing a NEW Home on the stack every time. */}
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={22} color={colors.text} />
         </TouchableOpacity>
@@ -289,6 +286,11 @@ export function ScheduleScreen({ route, navigation }: Props) {
 
         {triggerType === 'app' && (
           <View style={styles.section}>
+            {/* FIX: "Coming Soon" banner — App Guard not yet functional */}
+            <View style={styles.comingSoonBanner}>
+              <Ionicons name="construct-outline" size={14} color={colors.accent} />
+              <Text style={styles.comingSoonText}>App Guard is coming soon — video won't auto-trigger yet</Text>
+            </View>
             <Text style={styles.sublabel}>Select App</Text>
             <View style={styles.repeatGrid}>
               {POPULAR_APPS.map(app => (
@@ -405,6 +407,12 @@ const styles = StyleSheet.create({
   repeatInfoText:   { fontFamily: fonts.montserratBold, fontSize: 12, color: colors.danger, flex: 1 },
   repeatNextText:   { fontFamily: fonts.inter, fontSize: 12, color: colors.accent, flex: 1 },
   hint:             { fontFamily: fonts.inter, fontSize: 12, color: colors.textLight },
+  comingSoonBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
+    backgroundColor: colors.card, borderRadius: radius.md, padding: spacing.sm,
+    borderWidth: 1, borderColor: colors.border,
+  },
+  comingSoonText:   { fontFamily: fonts.inter, fontSize: 12, color: colors.accent, flex: 1 },
   playOnceRow:      {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     backgroundColor: colors.card, borderRadius: radius.md, padding: spacing.md,

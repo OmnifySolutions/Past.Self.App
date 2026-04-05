@@ -1,8 +1,11 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, SafeAreaView, Animated,
+  View, Text, StyleSheet, TouchableOpacity, Animated,
   ScrollView,
 } from 'react-native';
+// FIX: Removed SafeAreaView from react-native — caused pink gap on permission error screen.
+// Use useSafeAreaInsets hook instead.
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CameraView, CameraType, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
@@ -14,7 +17,6 @@ type Props = NativeStackScreenProps<RootStackParamList, 'Record'>;
 
 const MAX_DURATION = 60;
 
-// Spell-checked and grammar-reviewed prompts
 const SCRIPT_PROMPTS = [
   "Hey — put the phone down and go do the one thing you've been avoiding.",
   "You said you'd start today. This is the reminder. Start now.",
@@ -31,6 +33,7 @@ const SCRIPT_PROMPTS = [
 ];
 
 export function RecordScreen({ navigation, route }: Props) {
+  const insets = useSafeAreaInsets(); // FIX: hook instead of SafeAreaView
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [micPermission, requestMicPermission] = useMicrophonePermissions();
   const [facing, setFacing] = useState<CameraType>('front');
@@ -59,7 +62,6 @@ export function RecordScreen({ navigation, route }: Props) {
 
   const [isFocused, setIsFocused] = useState(true);
 
-  // Stop camera and recording when screen loses focus
   useFocusEffect(
     useCallback(() => {
       setIsFocused(true);
@@ -166,8 +168,9 @@ export function RecordScreen({ navigation, route }: Props) {
   if (!cameraPermission || !micPermission) return <View style={styles.container} />;
 
   if (!cameraPermission.granted || !micPermission.granted) {
+    // FIX: SafeAreaView replaced with View + insets for consistent safe area handling
     return (
-      <SafeAreaView style={[styles.container, styles.permContainer]}>
+      <View style={[styles.container, styles.permContainer, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
         <Ionicons name="videocam-off" size={48} color={colors.danger} style={{ marginBottom: spacing.md }} />
         <Text style={styles.permTitle}>Camera Access Required</Text>
         <Text style={styles.permBody}>Past.Self. needs camera and microphone access to record your messages.</Text>
@@ -180,7 +183,7 @@ export function RecordScreen({ navigation, route }: Props) {
         <TouchableOpacity onPress={handleBack} style={{ marginTop: spacing.md }}>
           <Text style={{ color: colors.textLight, fontFamily: fonts.inter }}>Go Back</Text>
         </TouchableOpacity>
-      </SafeAreaView>
+      </View>
     );
   }
 
@@ -196,7 +199,8 @@ export function RecordScreen({ navigation, route }: Props) {
         />
       )}
 
-      <SafeAreaView style={styles.header}>
+      {/* FIX: Header padding uses insets.top instead of SafeAreaView */}
+      <View style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>
         <TouchableOpacity onPress={handleBack} style={styles.iconBtn}>
           <Ionicons name="arrow-back" size={26} color="#fff" />
         </TouchableOpacity>
@@ -209,17 +213,14 @@ export function RecordScreen({ navigation, route }: Props) {
             <Ionicons name="camera-reverse-outline" size={26} color="#fff" />
           </TouchableOpacity>
         ) : <View style={styles.iconBtn} />}
-      </SafeAreaView>
+      </View>
 
-
-      {/* Thought bubble */}
       {!isRecording && (
         <View style={styles.thoughtBubble}>
           <Text style={styles.thoughtBubbleText}>{"What would you like your\nfuture self to know?"}</Text>
         </View>
       )}
 
-      {/* Script prompts panel */}
       {!isRecording && (
         <Animated.View style={[styles.promptsPanel, {
           opacity: promptsAnim,
@@ -238,7 +239,6 @@ export function RecordScreen({ navigation, route }: Props) {
         </Animated.View>
       )}
 
-      {/* Timer badge */}
       {isRecording && (
         <View style={styles.timerBadge}>
           <View style={styles.recDot} />
@@ -246,7 +246,6 @@ export function RecordScreen({ navigation, route }: Props) {
         </View>
       )}
 
-      {/* Progress bar */}
       {isRecording && (
         <View style={styles.progressTrack}>
           <View style={[styles.progressFill, {
@@ -256,8 +255,7 @@ export function RecordScreen({ navigation, route }: Props) {
         </View>
       )}
 
-      {/* Controls */}
-      <View style={styles.controls}>
+      <View style={[styles.controls, { bottom: insets.bottom + 24 }]}>
         {!isRecording && (
           <TouchableOpacity style={styles.promptsToggle} onPress={togglePrompts} activeOpacity={0.8}>
             <Ionicons name="bulb-outline" size={18} color="#fff" />
@@ -291,7 +289,7 @@ const styles = StyleSheet.create({
   permContainer: { alignItems: 'center', justifyContent: 'center', padding: spacing.lg },
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: spacing.md, paddingTop: spacing.sm,
+    paddingHorizontal: spacing.md,
     backgroundColor: 'rgba(0,0,0,0.4)',
   },
   headerTitle: { fontFamily: fonts.montserratBold, fontSize: 17, color: '#fff' },
@@ -314,7 +312,7 @@ const styles = StyleSheet.create({
   timerText: { fontFamily: fonts.inter, fontSize: 14, color: '#fff' },
   progressTrack: { position: 'absolute', bottom: 168, left: 0, right: 0, height: 3, backgroundColor: 'rgba(255,255,255,0.2)' },
   progressFill: { height: '100%' },
-  controls: { position: 'absolute', bottom: 56, alignSelf: 'center', alignItems: 'center', gap: spacing.sm },
+  controls: { position: 'absolute', alignSelf: 'center', alignItems: 'center', gap: spacing.sm },
   promptsToggle: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
     backgroundColor: 'rgba(152,152,214,0.25)', borderRadius: radius.full,
@@ -330,24 +328,14 @@ const styles = StyleSheet.create({
   recordBtnActive: { backgroundColor: '#8b3a4a' },
   stopIcon: { width: 24, height: 24, backgroundColor: '#fff', borderRadius: 4 },
   thoughtBubble: {
-    position: 'absolute',
-    top: 128,
-    left: 70,
-    right: 70,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.25)',
-    alignItems: 'center',
+    position: 'absolute', top: 128, left: 70, right: 70,
+    backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 16,
+    paddingHorizontal: 16, paddingVertical: 12,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.25)', alignItems: 'center',
   },
   thoughtBubbleText: {
-    fontFamily: fonts.inter,
-    fontSize: 14,
-    color: 'rgba(255,255,255,0.92)',
-    textAlign: 'center',
-    lineHeight: 21,
+    fontFamily: fonts.inter, fontSize: 14,
+    color: 'rgba(255,255,255,0.92)', textAlign: 'center', lineHeight: 21,
   },
   hint: { fontFamily: fonts.inter, fontSize: 13, color: 'rgba(255,255,255,0.7)' },
   permTitle: { fontFamily: fonts.montserratBold, fontSize: 20, color: '#fff', textAlign: 'center', marginBottom: spacing.sm },

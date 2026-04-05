@@ -4,7 +4,7 @@
 
 ---
 
-## Core Instructions for Claude
+## ⚡ Core Instructions for Claude
 
 **Read this every session before doing anything else.**
 
@@ -18,7 +18,6 @@ This means:
 - Never just agree to be agreeable
 
 **GitHub repo:** https://github.com/OmnifySolutions/Past.Self.App (public)
-Claude can fetch files directly when the user pastes a raw GitHub URL.
 
 ---
 
@@ -35,25 +34,33 @@ Claude can fetch files directly when the user pastes a raw GitHub URL.
 ## Tech Stack
 
 - **Framework:** React Native with Expo (SDK 54)
-- **Language:** TypeScript
-- **Navigation:** `@react-navigation/native` + `@react-navigation/native-stack`
-- **Storage:** `@react-native-async-storage/async-storage`
-- **Camera/Video recording:** `expo-camera`
-- **Video playback:** `expo-video` (migrated from expo-av)
-  - `useVideoPlayer` hook — must be called at TOP LEVEL only, never inside useEffect
-  - Events use `useEventListener` imported from `'expo'` (NOT from `'expo-video'`)
-  - `useEventListener(player, 'timeUpdate', callback)` for progress tracking
-  - `useEventListener(player, 'playToEnd', callback)` for end detection
-  - Set `player.timeUpdateEventInterval = 0.5` in the player init callback
-- **File system:** `expo-file-system/legacy` (use `/legacy` import — base API is deprecated)
-- **Thumbnails:** `expo-video-thumbnails` — generates real frames from permanent video file at save time
-- **Gradient:** `expo-linear-gradient`
-- **Safe Area:** `react-native-safe-area-context` — use `useSafeAreaInsets()` hook only, NEVER React Native's SafeAreaView
-- **Fonts:** `@expo-google-fonts/dancing-script`, `@expo-google-fonts/montserrat`, `@expo-google-fonts/inter`
-- **Icons:** `@expo/vector-icons` (Ionicons)
-- **SVG:** `react-native-svg`
-- **Gestures:** `react-native-gesture-handler`
-- **Date Picker:** `@react-native-community/datetimepicker`
+- **Language:** TypeScript ~5.9.2
+- **Navigation:** @react-navigation/native + @react-navigation/native-stack only. @react-navigation/stack is NOT installed.
+- **Storage:** @react-native-async-storage/async-storage
+- **Camera/Video recording:** expo-camera
+- **Video playback:** expo-video (expo-av is NOT installed — removed, deprecated)
+  - useVideoPlayer hook — must be called at TOP LEVEL only, never inside useEffect, never conditionally
+  - Events use useEventListener imported from 'expo' (NOT from 'expo-video')
+  - useEventListener(player, 'timeUpdate', callback) for progress tracking
+  - useEventListener(player, 'playToEnd', callback) for end detection
+  - Set player.timeUpdateEventInterval = 0.5 in the player init callback
+- **File system:** expo-file-system/legacy (use /legacy import — base API is deprecated)
+- **Thumbnails:** expo-video-thumbnails — generates real frames from permanent video file at save time
+- **Unique IDs:** expo-crypto — use Crypto.randomUUID() for video IDs, never Date.now()
+- **Gradient:** expo-linear-gradient
+- **Safe Area:** react-native-safe-area-context — use useSafeAreaInsets() hook EVERYWHERE. NEVER use React Native's SafeAreaView — causes pink status bar gap on iOS.
+- **Fonts:** @expo-google-fonts/dancing-script, @expo-google-fonts/montserrat, @expo-google-fonts/inter
+- **Icons:** @expo/vector-icons (Ionicons)
+- **SVG:** react-native-svg
+- **Gestures:** react-native-gesture-handler
+- **Date Picker:** @react-native-community/datetimepicker
+
+### Removed packages — do NOT re-add
+- expo-av — replaced by expo-video
+- expo-notifications — not yet wired up
+- expo-image-picker — not used
+- expo-media-library — not used
+- @react-navigation/stack — native-stack is used instead
 
 ---
 
@@ -61,14 +68,13 @@ Claude can fetch files directly when the user pastes a raw GitHub URL.
 
 ```
 PastSelfApp/
-├── App.tsx                          # Root navigation, font loading, auto-trigger check
-├── app.json                         # Expo config
-├── CLAUDE.md                        # This file
+├── App.tsx                    # Root navigation, font loading, trigger interval
+├── app.json                   # Expo config — plugins: expo-camera, expo-video only
+├── CLAUDE.md                  # This file
 └── src/
     ├── screens/
     │   ├── SplashScreen.tsx
     │   ├── OnboardingCameraScreen.tsx
-    │   ├── OnboardingScreen.tsx     # Exists but currently unused/skipped
     │   ├── HomeScreen.tsx
     │   ├── RecordScreen.tsx
     │   ├── ScheduleScreen.tsx
@@ -76,15 +82,19 @@ PastSelfApp/
     │   ├── PlaybackScreen.tsx
     │   └── ConfirmationScreen.tsx
     ├── components/
-    │   └── BrandAlert.tsx
+    │   └── BrandAlert.tsx     # Only modal component. BrandModal.tsx deleted.
     ├── utils/
     │   ├── storage.ts
     │   └── repeatUtils.ts
     ├── types/
-    │   └── video.ts
+    │   └── video.ts           # ScheduledVideo + RepeatOption union type
     └── styles/
         └── theme.ts
 ```
+
+**Deleted files — do not recreate:**
+- src/components/BrandModal.tsx — was dead code
+- src/screens/OnboardingScreen.tsx — 3-slide walkthrough, cut. OnboardingCamera IS the onboarding.
 
 ---
 
@@ -97,125 +107,150 @@ App opens
       → Returning: Home (after short animation)
 
 Home
-  → Record → Schedule → Confirmation → Home
-  → Tap video card → Edit → Confirmation → Home
+  → Record → Schedule → Confirmation → Home (stack reset)
+  → Tap card → Edit → Confirmation → Home (stack reset)
   → Tap thumbnail → Playback (isTriggered: false) → back to Home
   → Auto-trigger → Playback (isTriggered: true) → Home
 ```
+
+**CRITICAL navigation rules:**
+- ConfirmationScreen Done: calls setOnboarded() then CommonActions.reset({ routes: [{ name: 'Home' }] }) — wipes the stack cleanly from both onboarding and normal flows
+- ScheduleScreen Re-record: navigation.replace('Record', { prefill }) — removes Schedule from stack
+- EditScreen back: navigation.goBack()
+- Never use navigation.navigate('Home') from Confirmation — pushes a duplicate Home
 
 ---
 
 ## Screen Descriptions
 
 ### SplashScreen
-
-- **Background:** LinearGradient `#fdf4f5` → `#f8e8ed` → `#e8c0cd`
-- **Sparkles:** 1000 animated white (`#ffffff`) dots, randomized delays (0–8000ms), random loop gaps (1000–5000ms) so they never sync up. Opacity 0.75 at peak.
-- **Header text:** "What if your" / "Past.Self." (Dancing Script 56, `#674454`) / "could..."
-- **Cycling phrases** in `#9898d6`:
-  1. stop you from procrastinating.
-  2. break your bad habits.
-  3. remind you why you started.
-  4. stop you from wasting time...
-- **Phrase animation:** slide in from right (translateX, 320ms) then hold (1400ms) then fade out (280ms). Next phrase starts sliding in simultaneously as current fades — zero gap, no overlap of text. Each phrase uses identical timing constants.
-- **Last phrase** stays visible; "Try It Now!" button fades in on top
-- **"Try It Now!" button:**
-  - Pulsates: scale 1 → 1.06 → 1 over 1.8s loop
-  - White glow: two stacked shadow layers (glowOuter: shadowRadius 28, glowInner: shadowRadius 12), both white, opacity pulses 0.2 → 1 → 0.2
-  - Button itself has white inner shadow
-- Returning users: short animation then auto-navigates to Home
+- Background: LinearGradient #fdf4f5 → #f8e8ed → #e8c0cd
+- Sparkles: ~550 animated white dots, randomized delays and loop gaps
+- Header: "What if your" / "Past.Self." (Dancing Script 56, #674454) / "could..."
+- Cycling phrases in #9898d6: procrastinating → bad habits → why you started → wasting time
+- Phrase animation: slide in (320ms) → hold (1400ms) → fade out (280ms). Next starts as current fades.
+- Last phrase stays; "Try It Now!" button fades in with pulse + white glow
+- Returning users: short animation → navigation.replace('Home')
 
 ### OnboardingCameraScreen
-
-- **Background:** LinearGradient `#6b3f52` → `#52303f` → `#35202c`
-- **Sparkles:** 60 dots, `#e8c4cc` color, delays 0–6000ms, randomized loop gaps
-- **Camera icon:** Large standalone SVG (96px), no circle wrapper, centered via flex `justifyContent: 'center'` + `alignItems: 'center'` on parent. viewBox adjusted so lens is centered.
-- Animated prompts cycle in `#9898d6`
-- "Be honest. Be direct. Your future self is listening." above record button
+- Background: LinearGradient #6b3f52 → #52303f → #35202c
+- Sparkles: 10 dots, #e8c4cc color
+- Large camera SVG icon, centered, no circle wrapper
+- Animated prompts cycle in #9898d6
+- "Be honest. Be direct." above record button
 - No skip button — forces first recording
 
 ### RecordScreen
-
 - Full-screen camera, front-facing by default
-- **Thought bubble:** Simple frosted glass pill at top center
-  - `position: 'absolute', top: 128, left: 70, right: 70`
-  - `backgroundColor: 'rgba(255,255,255,0.15)'`, `borderRadius: 16`
-  - `borderWidth: 1, borderColor: 'rgba(255,255,255,0.25)'`
-  - Text: "What would you like your\nfuture self to know?"
-  - Font: `fonts.inter` (normal weight, NOT bold), `fontSize: 14`, `color: 'rgba(255,255,255,0.92)'`
-  - No tail/circle — just the pill shape
-  - Pulsates: scale 1 → 1.09 → 1 over 1.7s loop
-  - Hidden while recording
-- 12 script prompts (spell-checked)
-- `useFocusEffect` cleanup stops camera on navigate away
-- `isMountedRef` guards all state updates
+- useSafeAreaInsets() for header and controls — NOT SafeAreaView
+- Thought bubble: frosted pill (rgba(255,255,255,0.15)), fonts.inter (NOT bold), fontSize: 14
+- 12 spell-checked script prompts
+- useFocusEffect cleanup: stops camera + recording on navigate away
+- isMountedRef guards all state updates
 
 ### ScheduleScreen
+- useSafeAreaInsets() — NOT SafeAreaView
+- CRITICAL video file handling: always delete existing file before copying new one (re-record safety)
+- Video ID: Crypto.randomUUID() — NOT Date.now()
+- Re-record: navigation.replace('Record', { prefill }) — not navigate
+- Thumbnail: expo-video-thumbnails at time: 500, from permanent video URI
+- App Trigger section shows "Coming Soon" banner
 
-- **CRITICAL:** Saves video URI to permanent storage using `expo-file-system/legacy`
-- Copies video from temp camera URI to `FileSystem.documentDirectory + 'videos/' + id + '.mp4'`
-- **Thumbnail:** Generates a real frame using `expo-video-thumbnails` at 0.5s into the video, copies to `FileSystem.documentDirectory + 'thumbnails/' + id + '.jpg'`. Thumbnail generation is non-fatal — video still saves if it fails.
-- Uses `useSafeAreaInsets()` — NOT React Native's SafeAreaView
-- Back button uses `navigation.goBack()` — NOT `navigation.navigate('Home')`
-- Shows "Saving..." on button while copying
-- Same form as EditScreen: title, note, date/time or app trigger, repeat
+### EditScreen
+- useSafeAreaInsets() — NOT SafeAreaView
+- RepeatOption typed state for repeat field
+- Re-record via BrandAlert confirmation
+- App Trigger section shows "Coming Soon" banner
 
 ### PlaybackScreen
-
-- **Architecture:** Two-component pattern
-  - `PlaybackScreen` (outer): loads video from storage, shows black screen while loading
-  - `PlayerView` (inner): only mounts once video is loaded, so `useVideoPlayer` always gets a real URI
-- `useVideoPlayer({ uri: video.videoUri }, p => { p.timeUpdateEventInterval = 0.5; p.play(); })`
-- **Done button logic:**
-  - `isTriggered: false` (manual review from HomeScreen): Done button ALWAYS visible from start
-  - `isTriggered: true` (scheduled/app trigger): Done only appears after video finishes
-- `isTriggered` defaults to `false` via `?? false` — never undefined in PlayerView
-- Skip button: appears after 5s, only when `isTriggered: true`
-- Progress bar in `#9898d6`, time stamps below
-- `nativeControls={false}` on VideoView
+- Two-component pattern: PlaybackScreen (outer loader) + PlayerView (inner, mounts only with real URI)
+- useVideoPlayer at top level of PlayerView — never conditional
+- Import useEventListener from 'expo' not 'expo-video'
+- Done button: always visible when isTriggered: false; only after video finishes when isTriggered: true
+- Skip button: appears after 5s, only when isTriggered: true
+- handleDone: only updates storage for appTrigger.playOnce case. Datetime one-shots already marked inactive by checkScheduledVideos — do NOT double-write isActive: false here.
+- No BrandAlert — was removed (dead code)
 
 ### HomeScreen
+- useSafeAreaInsets() for paddingTop
+- Three sections: Upcoming (hero card), Scheduled, App Triggers
+- Empty state: fills full screen, How It Works visible without scrolling
+- CRITICAL: All sub-components defined at module level outside HomeScreen — NEVER inline. Inline = remount every render = image flicker + animation resets.
 
-- Uses `useSafeAreaInsets` (no pink status bar gap)
-- Three sections: Upcoming (hero card), Scheduled (datetime), App Triggers
-- **Empty state:** fills the full screen without scrolling — How It Works section visible without scroll
-- **Card layout:** drag handle (ellipsis-vertical dots) | thumbnail | info | iOS alarm toggle
-- **Drag-to-reorder:** `DraggableList` component using `PanResponder`. Only the drag handle captures the gesture. State is mutated only on release (not mid-drag) to prevent twitching. Works on both Scheduled and App Triggers sections.
-- **Swipe-to-delete:** `SwipeableCard` wrapper. Swipe left to reveal red Delete zone (72px). Tap to confirm via modal, swipe right to dismiss.
-- **iOS alarm toggle:** custom `AlarmToggle` component, spring-animated. Controls `isPaused`, NOT `isActive`. Right-side of card, vertically centred via `alignSelf: 'stretch'` + `justifyContent: 'center'`.
-- **Pause label:** only shown on manually paused non-play-once cards
-- **Played label:** only shown on play-once app trigger cards that have fired
-- **CRITICAL — no inline component definitions:** `UpcomingCard`, `AlarmToggle`, `HowItWorks`, `SwipeableCard`, `DraggableList` are all defined at module level outside `HomeScreen`. Inline definitions cause React to remount on every render → image flicker, animation resets.
-- Tap thumbnail → `navigation.navigate('Playback', { videoId, isTriggered: false })`
+#### Swipe-to-delete (SwipeableCard)
+- ROOT CAUSE OF DELETE ZONE PEEK: TouchableOpacity activeOpacity dimmed the card on press,
+  making the red zone behind it visible. Fixed permanently with:
+  1. swipeContainer backgroundColor = colors.danger (container IS the red zone)
+  2. deleteZoneCover view slides WITH the card on its right edge — covers zone at rest,
+     reveals it as card slides left
+  3. All card TouchableOpacity use activeOpacity={1} — card never dims on press
+  4. AlarmToggle uses activeOpacity={1} — toggle never dims on press
+- offsetX ref tracks committed position
+- currentX ref (via listener) tracks live position — used on grant to avoid jump on interrupted animations
+- onMoveShouldSetPanResponder: dx > 10 AND dx > dy * 2 — prevents vertical taps triggering swipe
+- Snap: currentX < -52 or vx < -0.5
+
+#### Drag-to-reorder (DraggableList)
+- ROOT CAUSE OF DRAG FAILURE: Long-press timer inside PanResponder was cancelled by iOS
+  sending move events within ~50ms even for stationary fingers (digitiser noise).
+- FIX: Use Pressable onLongPress (OS-level, reliable) for activation. Shared PanResponder
+  handles movement only AFTER isDraggingRef is set. The two are fully decoupled.
+- delayLongPress={400} on Pressable
+- onMoveShouldSetPanResponder + onMoveShouldSetPanResponderCapture both return isDraggingRef.current
+- Grabbed card: scale 1.05 spring + shadow elevation lift
+- Hover feedback: target slot card plays 3-step shake (±4px)
+- During drag: card renders WITHOUT SwipeableCard wrapper — prevents delete zone bleed-through
+- orderedIdsRef keeps live order for PanResponder closures without stale captures
+- onScrollEnable(false) during drag, restored on release/terminate
+
+#### How It Works
+- alignSelf: 'center', width: '88%', marginBottom: spacing.lg — NOT full width, has bottom margin
 
 ### ConfirmationScreen
-
-- Plays video preview (uses thumbnail Image, not actual video player)
-- Tap thumbnail → `navigation.navigate('Playback', { videoId, isTriggered: false })`
-- Manual Done button only
+- useSafeAreaInsets() — NOT SafeAreaView (was using SafeAreaView from react-native, now fixed)
+- Fade-in entrance animation
+- Done: calls setOnboarded() then CommonActions.reset({ routes: [{ name: 'Home' }] })
+- Tap thumbnail → Playback (isTriggered: false)
+- Trigger card: icon + text centered with justifyContent: 'center'
 
 ---
 
 ## Data Model
 
 ```typescript
+// RepeatOption is a union type — NEVER use plain string
+type RepeatOption = 'never' | 'daily' | 'weekdays' | 'weekends' | 'weekly' | 'monthly';
+
 interface ScheduledVideo {
-  id: string;                    // Date.now().toString()
-  videoUri: string;              // Permanent local file URI (in documentDirectory/videos/)
-  thumbnail?: string;            // Permanent local file URI (in documentDirectory/thumbnails/)
+  id: string;            // Crypto.randomUUID() — never Date.now()
+  videoUri: string;      // Permanent: documentDirectory/videos/{id}.mp4
+  thumbnail?: string;    // Permanent: documentDirectory/thumbnails/{id}.jpg
   title: string;
   message: string;
-  createdAt: string;
-  scheduledFor?: string;         // ISO string for datetime trigger
-  repeat?: string;               // 'never'|'daily'|'weekdays'|'weekends'|'weekly'|'monthly'
+  createdAt: string;     // ISO date string
+  scheduledFor?: string; // ISO string — datetime trigger only
+  repeat?: RepeatOption; // typed union, not string
   appTrigger?: {
     appName: string;
     playOnce: boolean;
     hasPlayed?: boolean;
   };
-  duration: number;              // seconds
-  isActive: boolean;             // owned by trigger system — marks video done/expired. NEVER used for user pause.
-  isPaused?: boolean;            // owned by user toggle — paused videos skip all trigger checks
+  duration: number;      // seconds
+  isActive: boolean;     // trigger system only — marks done/expired. NEVER for user pause.
+  isPaused?: boolean;    // user toggle only — paused videos skip all trigger checks
+}
+
+// PrefillData — re-record flow: Edit/Schedule → Record → Schedule
+interface PrefillData {
+  id?: string;
+  title?: string;
+  message?: string;
+  triggerType?: 'datetime' | 'app';
+  scheduledFor?: string;
+  repeat?: RepeatOption; // typed union — NOT string
+  appName?: string;
+  playOnce?: boolean;
+  createdAt?: string;
 }
 ```
 
@@ -237,141 +272,123 @@ Border:       rgba(20, 39, 60, 0.08)
 Overlay:      rgba(20, 39, 60, 0.5)
 ```
 
+### #9898d6 Usage Rule
+
+Use VERY sparingly: progress bars, Upcoming badge dot, "Next:" date text, script prompt icons, "Paused" badge text, animated onboarding prompts. Never for primary actions or toggles.
+
 ### Fonts
 
 ```
-App name:     Dancing Script Bold (fonts.brittany)
-Headers:      Montserrat Bold 700
-Subheaders:   Montserrat Medium 500
-Body/UI:      Inter Regular 400 / Inter Medium 500
+App name:    Dancing Script Bold (fonts.brittany)
+Headers:     Montserrat Bold 700 (fonts.montserratBold)
+Subheaders:  Montserrat Medium 500 (fonts.montserratMedium)
+Body/UI:     Inter Regular 400 (fonts.inter) / Inter Medium 500 (fonts.interMedium)
 ```
-
-### #9898d6 Usage Rule
-
-Use VERY sparingly — only for: progress bars, Upcoming badge dot, "Next:" date text, script prompt icons, "Paused" badge text, animated onboarding prompts. Never for primary actions or toggles.
 
 ---
 
 ## Key Logic
 
-### Video Storage (CRITICAL — permanent URI)
+### Auto-trigger Architecture
 
-Camera gives a temporary URI that iOS deletes. On save in ScheduleScreen:
-1. Create `FileSystem.documentDirectory + 'videos/'` directory
-2. Copy temp URI to permanent path: `permanentDir + videoId + '.mp4'`
-3. Generate thumbnail with `expo-video-thumbnails` from the permanent video URI (time: 500ms)
-4. Copy thumbnail to `FileSystem.documentDirectory + 'thumbnails/' + videoId + '.jpg'`
-5. Save both permanent URIs to AsyncStorage — never the temp camera URIs
-6. Import FileSystem from `'expo-file-system/legacy'` not `'expo-file-system'`
+- checkScheduledVideos imported at top level in App.tsx
+- NOT called on nav mount / onLayoutRootView. Called in HomeScreen's useFocusEffect — fires only when user is on Home, never during Splash animation.
+- Also runs: 30s interval + AppState foreground (both in App.tsx)
+- navigationRef.current?.isReady() guard before navigate
+- One-shot datetime: marked isActive: false immediately on trigger
+- Repeating datetime: scheduledFor advanced to next future occurrence
+- Paused videos skipped entirely
 
-### expo-video Rules
+### Onboarding Completion (CRITICAL)
 
-- `useVideoPlayer` must be at TOP LEVEL of component — never inside useEffect, never conditionally
-- Use the two-component pattern in PlaybackScreen so the hook always gets a real URI
-- Import `useEventListener` from `'expo'`, not `'expo-video'`
-- `fullscreenOptions` prop instead of deprecated `allowsFullscreen`
+setOnboarded() from storage.ts MUST be called in ConfirmationScreen.handleDone before navigating. If missing: every session treats user as first-time → loops back to OnboardingCamera.
 
-### Auto-trigger
+### Splash isFirstTime (CRITICAL)
 
-- `checkScheduledVideos` is imported at top level in App.tsx — not dynamically inside the interval
-- Called immediately on mount (cold-start triggers fire instantly), then every 30s, and on every app foreground via `AppState`
-- Navigation guard: `navigationRef.current?.isReady()` checked before calling `navigate` — prevents race condition on cold start
-- One-shot datetime: marked `isActive: false` immediately when triggered
-- Repeating datetime: `scheduledFor` advanced to next future occurrence via `getNextOccurrence()`
-- App triggers: NOT processed by the datetime scheduler loop — handled only by App Guard (when built)
-- Paused videos (`isPaused: true`) are skipped entirely by `checkScheduledVideos`
+App.tsx waits for BOTH font loading AND isOnboarded() to resolve before rendering the navigator.
+isFirst state starts as null — the navigator is NOT rendered until isFirst is a real boolean.
+This prevents initialParams from firing before the async check completes (race condition that
+caused returning users to always see the first-time splash).
 
-### Repeat Logic (repeatUtils.ts)
+```typescript
+// CORRECT pattern in App.tsx
+const [isFirst, setIsFirst] = useState<boolean | null>(null);
+if (!appReady || isFirst === null) return null; // hold render until resolved
+```
 
-- Monthly repeat uses day-clamping to prevent drift: Jan 31 → Feb 28 (not Mar 3). Detects JS date overflow via `next.getDate() !== originalDay` and rolls back with `setDate(0)`.
-- Safety counter is 60 iterations (covers 2 months of daily advancement) — not 400.
-- `getNextOccurrence` returns `null` if no future date found within safety limit.
+### Video Storage
 
-### isPaused vs isActive — CRITICAL DISTINCTION
+1. permanentDir = FileSystem.documentDirectory + 'videos/'
+2. If file exists at target path: deleteAsync first (re-record safety)
+3. copyAsync to permanent path
+4. expo-video-thumbnails at time: 500 from permanent URI
+5. Copy thumbnail to documentDirectory/thumbnails/{id}.jpg
+6. Save permanent URIs to AsyncStorage — never temp camera URIs
+7. Import: expo-file-system/legacy
 
-These two fields are owned by different systems and must never be conflated:
-- `isActive` — owned by the trigger system. Set to `false` when a one-shot video has played or expires. Never toggled by the user directly.
-- `isPaused` — owned by the user via the HomeScreen toggle. When `true`, the video is skipped in all trigger checks. Does not affect `isActive`.
+### isPaused vs isActive
 
-### HomeScreen Component Architecture — CRITICAL
+- isActive: trigger system. false = played/expired. Never set by user.
+- isPaused: user toggle. true = skipped in trigger checks. Does not affect isActive.
 
-All sub-components (`UpcomingCard`, `AlarmToggle`, `HowItWorks`, `SwipeableCard`, `DraggableList`) MUST be defined at module level, outside the `HomeScreen` function. Defining them inline causes React to treat them as new component types on every render → remounts → image flickers + animation resets.
+### PlaybackScreen Done Logic
 
-### Drag-to-Reorder Pattern (DraggableList)
+handleDone only writes for appTrigger.playOnce case. Datetime one-shots already handled by checkScheduledVideos. No double-write.
 
-- `PanResponder` attached to the drag handle only (ellipsis-vertical icon) — not the whole card
-- During drag: only `Animated.Value` (`dragY`) moves — no state mutations
-- On release: calculate new index from `dy / CARD_HEIGHT`, commit to `orderedIds` state, call `onReorder`
-- `LayoutAnimation` animates remaining cards into new positions on release
-- Parent `ScrollView` scroll is disabled during drag via `onScrollEnable` prop
+### RepeatOption
 
-### Swipe-to-Delete Pattern (SwipeableCard)
+Always type repeat fields as RepeatOption, never string. Defined in src/types/video.ts. All repeatUtils.ts functions accept RepeatOption.
 
-- `PanResponder` only intercepts horizontal gestures (`dx > dy * 1.5`)
-- Uses `setOffset` + `setValue` pattern for re-open support
-- Snap threshold: 60px left or velocity < -0.6
-- Delete zone (72px wide) sits at `position: absolute, right: 0` behind the card
-- Tapping the zone closes the swipe and opens the confirmation modal
+### Monthly Repeat
 
-### Re-record Flow
+Clamps to last day of month: detects overflow via next.getDate() !== originalDay, rolls back with setDate(0). Safety counter: 60 iterations.
 
-EditScreen/ScheduleScreen → `buildPrefill()` → Record → Schedule (pre-filled) → saves with same `prefill.id` (upsert). Re-saving always overwrites thumbnail with freshly generated one.
+---
 
-### Storage Upsert Pattern
+## app.json Plugins
 
-`saveVideo()` checks if ID exists before inserting. If yes, updates in place. Prevents duplicates.
-
-### PlaybackScreen Done / Deactivation Logic
-
-Uses `else if` to prevent double `updateVideo` calls:
-- App trigger (playOnce, not yet played) → sets `hasPlayed: true` and `isActive: false`
-- Datetime one-shot (no repeat) → sets `isActive: false`
-- Repeat datetime triggers are already advanced in `checkScheduledVideos` before screen mounts — PlaybackScreen does not touch them
+Only these two:
+```json
+"plugins": ["expo-camera", "expo-video"]
+```
 
 ---
 
 ## Current Development State
 
 ### Working
-- Full recording flow (camera → schedule → confirmation → home)
-- Video permanently saved to `documentDirectory/videos/` — survives app restarts
-- Thumbnails permanently saved to `documentDirectory/thumbnails/` — real video frames via `expo-video-thumbnails`
-- Video playback with `expo-video` (two-component pattern)
-- Done button: always visible for manual review, gated for triggered playback
-- Skip button: appears after 5s on triggered playback only
-- Date/time trigger with repeat options (monthly drift fixed)
-- App trigger (simulated — App Guard not yet native)
-- Edit existing videos with re-record flow
-- Upcoming card section with correct repeat label
-- Auto-trigger: fires on cold start + every 30s + on foreground. Race condition fixed.
-- SplashScreen: 1000 white sparkles, phrase slide-in/fade-out, pulsating glow button
-- OnboardingCameraScreen: 60 sparkles, large centered camera icon (no circle)
-- RecordScreen: frosted glass thought bubble (normal font, pulsating)
-- PlaybackScreen: correct expo-video API, smart Done/Skip logic
-- BrandAlert replacing all system alerts
-- Camera green light fix (CameraView unmounts on blur)
-- useSafeAreaInsets everywhere (no pink status bar gap)
-- ScheduleScreen back button uses goBack() — no stack accumulation
-- iOS alarm-style toggle (AlarmToggle) on every card — spring animated, vertically centred, right-side
-- isPaused / isActive correctly separated — paused videos skip trigger checks
-- "Paused" label: manual-pause only, never on play-once app trigger cards
-- "Played" label: play-once app trigger cards only, after firing
-- Drag-to-reorder on both Scheduled and App Triggers — stable, no mid-drag twitching
-- Swipe-to-delete on all cards — Gmail/iOS style, red zone, confirmation modal
-- Ellipsis-vertical (three dots) drag handle
-- Empty state fills screen without scroll — How It Works visible without scrolling
-- No inline component definitions in HomeScreen — eliminates image flicker on state updates
+- Full recording flow
+- Permanent video + thumbnail storage (randomUUID IDs)
+- expo-video playback (two-component pattern, correct event API)
+- Done / Skip button logic
+- Date/time trigger + RepeatOption typed repeat (monthly drift fixed)
+- App trigger: simulated, "Coming Soon" banners on Schedule + Edit screens
+- Edit + re-record (replace() cleans stack)
+- Auto-trigger: HomeScreen focus + 30s + foreground (not during Splash)
+- Onboarding: setOnboarded() called → no loop back
+- CommonActions.reset() navigation clears full stack correctly
+- How It Works: 88% width, centered, marginBottom so it doesn't hug bottom
+- navigationRef fully typed
+- RepeatOption union type everywhere
+- useSafeAreaInsets on all screens (ConfirmationScreen fixed — was using SafeAreaView)
+- Dead code cleaned: BrandModal, OnboardingScreen, expo-av, expo-notifications, expo-image-picker, expo-media-library, @react-navigation/stack
+- app.json fixed: broken plugins array repaired, expo-av ghost removed
+- SwipeableCard delete zone peek fixed: cover view + activeOpacity={1} on all cards
+- DraggableList drag activation fixed: Pressable onLongPress replaces broken PanResponder timer
 
-### Known Remaining Issue
-- **Multi-video trigger queue:** If two datetime videos are both past-due simultaneously (e.g. after long absence), only one triggers per check cycle. The second fires 30 seconds later. Low severity.
+### Known Issues / Pending
+- Splash isFirstTime: App.tsx fix is in place (null guard + async resolution before render).
+  However stale onboarding flag in AsyncStorage from previous test runs may cause returning
+  user behaviour until storage is cleared. Fix: temporarily add AsyncStorage.clear() to
+  prepare() function, run once, then remove.
+- Multi-video trigger queue: two past-due videos → one triggers, second fires 30s later
 
-### Not Yet Working / TODO Before App Store
-- App Guard is simulated only (needs native iOS/Android implementation)
-- Background notifications not wired (`expo-notifications` is installed but unused)
-- Login prompt after first video saved (peak emotional investment — not yet built)
-- Cloud backup not implemented
-- OnboardingScreen (3-slide walkthrough) exists but is skipped — **decision: cut it.** OnboardingCamera IS the onboarding; the 3-slide version adds unnecessary friction.
-- Android testing (developed primarily on iOS)
+### TODO Before App Store
+- App Guard native implementation (iOS: Screen Time API, Android: accessibility service)
+- Background notifications
+- Login prompt after first save
+- Cloud backup
+- Android testing
 
 ---
 
@@ -380,16 +397,15 @@ Uses `else if` to prevent double `updateVideo` calls:
 - **Free tier:** limited recordings, date/time trigger only, no repeat
 - **Past.Self. Pro — €8.99 one-time:** unlimited videos, App Guard (when built), repeat scheduling
 - No ads, ever
-- Login prompt after first video saved (peak emotional investment) — **not yet implemented**
+- Login prompt after first video saved — not yet implemented
 
 ---
 
 ## Commands
 
 ```bash
-npx expo start --clear                  # Start dev server
-npx expo install [package]              # Install package (respects SDK version)
-npx expo install expo-video-thumbnails  # Required — install if not already in package.json
+npx expo start --clear      # Start dev server, clear cache
+npx expo install [package]  # Install respecting SDK version
 ```
 
 ---
@@ -399,4 +415,4 @@ npx expo install expo-video-thumbnails  # Required — install if not already in
 1. Copy this file's contents
 2. Start new conversation
 3. Paste with: "This is the complete context for Past.Self., a React Native app I'm building. Please read it fully — especially the Core Instructions — before we continue."
-4. GitHub repo is public: https://github.com/OmnifySolutions/Past.Self.App
+4. GitHub: https://github.com/OmnifySolutions/Past.Self.App

@@ -9,7 +9,6 @@ import { RootStackParamList } from '../../App';
 import { getVideos, updateVideo } from '../utils/storage';
 import { ScheduledVideo } from '../types/video';
 import { colors, fonts, spacing, radius } from '../styles/theme';
-import { BrandAlert, useBrandAlert } from '../components/BrandAlert';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Playback'>;
 
@@ -30,7 +29,10 @@ function PlayerView({
   const [videoFinished, setVideoFinished] = useState(false);
   const skipOpacity   = useRef(new Animated.Value(0)).current;
   const watchTimer    = useRef<NodeJS.Timeout | null>(null);
-  const { alertConfig } = useBrandAlert();
+
+  // FIX: Removed useBrandAlert() — it was called but showAlert/hideAlert were
+  // never wired up, making it dead code. BrandAlert removed from this screen.
+  // If error handling is needed here in future, wire up showAlert properly.
 
   const player = useVideoPlayer({ uri: video.videoUri }, p => {
     p.timeUpdateEventInterval = 0.5;
@@ -42,7 +44,6 @@ function PlayerView({
     const d = player.duration ?? 0;
     setCurrentTime(t);
     if (d > 0) setDuration(d);
-    // Treat as finished when within 0.3s of end
     if (d > 0 && t >= d - 0.3) setVideoFinished(true);
   });
 
@@ -50,7 +51,6 @@ function PlayerView({
     setVideoFinished(true);
   });
 
-  // Skip button fade-in — only for triggered playback
   useEffect(() => {
     if (!isTriggered) return;
     let elapsed = 0;
@@ -69,18 +69,14 @@ function PlayerView({
   }, [isTriggered]);
 
   const handleDone = async () => {
-    // FIX: Use else-if to prevent double updateVideo calls on malformed data.
-    // A valid video only ever has one trigger type, but we guard defensively.
+    // FIX: Removed the datetime one-shot branch — checkScheduledVideos() already
+    // marks the video inactive before this screen opens. Double-writing is wrong.
+    // Only the appTrigger.playOnce case needs action here (marking hasPlayed).
     if (video.appTrigger?.playOnce && !video.appTrigger.hasPlayed) {
       await updateVideo(video.id, {
         appTrigger: { ...video.appTrigger, hasPlayed: true },
         isActive: false,
       });
-    } else if (video.scheduledFor && (!video.repeat || video.repeat === 'never')) {
-      // One-shot datetime trigger — mark inactive on done.
-      // Repeat datetime triggers are already advanced in checkScheduledVideos
-      // before this screen is even shown, so we don't touch them here.
-      await updateVideo(video.id, { isActive: false });
     }
     navigation.goBack();
   };
@@ -93,9 +89,6 @@ function PlayerView({
     return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
-  // Done button logic:
-  // - isTriggered (scheduled/app trigger): only show after video finishes
-  // - not triggered (manual review from Home): always show
   const showDoneButton = isTriggered ? videoFinished : true;
 
   return (
@@ -106,7 +99,6 @@ function PlayerView({
         nativeControls={false}
       />
 
-      {/* Skip button — triggered only, fades in after SKIP_DELAY seconds */}
       {isTriggered && (
         <Animated.View
           style={[styles.skipBtn, { top: insets.top + spacing.md, opacity: skipOpacity }]}
@@ -132,15 +124,12 @@ function PlayerView({
           </TouchableOpacity>
         )}
       </View>
-
-      <BrandAlert {...alertConfig} />
     </View>
   );
 }
 
 export function PlaybackScreen({ route, navigation }: Props) {
   const { videoId, isTriggered } = route.params;
-  // FIX: Default isTriggered to false if undefined — avoids implicit coercion.
   const triggered = isTriggered ?? false;
   const [video, setVideo] = useState<ScheduledVideo | null>(null);
 
@@ -151,7 +140,6 @@ export function PlaybackScreen({ route, navigation }: Props) {
     });
   }, [videoId]);
 
-  // Show black screen while loading — the PlayerView must never mount without a real URI
   if (!video) return <View style={styles.container} />;
 
   return (
