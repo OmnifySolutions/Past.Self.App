@@ -19,6 +19,13 @@ This means:
 
 **GitHub repo:** https://github.com/OmnifySolutions/Past.Self.App (public)
 
+### GitHub access tip
+Claude can fetch files directly when given a **raw** GitHub URL:
+- ✅ `https://raw.githubusercontent.com/OmnifySolutions/Past.Self.App/main/App.tsx`
+- ❌ `https://github.com/OmnifySolutions/Past.Self.App/blob/main/App.tsx` — blocked by robots.txt
+
+To get a raw URL: open the file on GitHub → click "Raw" → copy that URL and paste it into chat.
+
 ---
 
 ## App Overview
@@ -28,6 +35,8 @@ This means:
 **Concept:** Users record short video messages to their future selves. Each video is triggered to play at a specific moment — either at a scheduled date/time (like an alarm) or when the user opens a specific app (e.g. Instagram). The purpose is motivation, accountability, habit-breaking, reminders, and self-persuasion.
 
 **Why it works psychologically:** Hearing your own voice and seeing your own face creates a stronger emotional response than any external notification or quote. Your past self becomes your coach.
+
+**Original vision / lock screen intent:** The founding idea was intercepting the user *before* they unlock their phone — your past self plays before you can get to Instagram or anything else. This is currently classified under "App Guard" in the TODO. App Guard is NOT just an app-open trigger — it's meant to eventually intercept at the OS level (iOS: Screen Time API, Android: accessibility service). Keep this intent in mind for all UX and feature decisions.
 
 ---
 
@@ -46,6 +55,7 @@ This means:
   - Set player.timeUpdateEventInterval = 0.5 in the player init callback
 - **File system:** expo-file-system/legacy (use /legacy import — base API is deprecated)
 - **Thumbnails:** expo-video-thumbnails — generates real frames from permanent video file at save time
+  - ⚠️ May not be in package.json yet — if missing, run: `npx expo install expo-video-thumbnails`
 - **Unique IDs:** expo-crypto — use Crypto.randomUUID() for video IDs, never Date.now()
 - **Gradient:** expo-linear-gradient
 - **Safe Area:** react-native-safe-area-context — use useSafeAreaInsets() hook EVERYWHERE. NEVER use React Native's SafeAreaView — causes pink status bar gap on iOS.
@@ -94,7 +104,20 @@ PastSelfApp/
 
 **Deleted files — do not recreate:**
 - src/components/BrandModal.tsx — was dead code
-- src/screens/OnboardingScreen.tsx — 3-slide walkthrough, cut. OnboardingCamera IS the onboarding.
+- src/screens/OnboardingScreen.tsx — 3-slide walkthrough, deliberately cut. Reason: OnboardingCamera IS the onboarding. A 3-slide walkthrough before the camera creates friction at exactly the wrong moment — the emotional hook is picking up the phone and recording immediately. The slides added zero value and delayed the "aha" moment.
+
+---
+
+## Key Product Decisions (with reasoning)
+
+### €8.99 one-time pricing — intentional
+No subscription. One-time purchase signals trust. The target user is someone making a personal, emotional commitment — not someone who wants another monthly bill. Subscriptions also increase churn anxiety. Revisit only if monetisation data proves otherwise.
+
+### No ads — permanent
+Not a toggle. Not a "for now" decision. Ads would destroy the emotional tone of the app. Non-negotiable.
+
+### Login after first save — deferred but important
+Login prompt triggers after the first video is saved — peak emotional investment. Not after launch, not on cold open. Deferred because it needs backend/cloud infrastructure first.
 
 ---
 
@@ -134,16 +157,20 @@ Home
 
 ### OnboardingCameraScreen
 - Background: LinearGradient #6b3f52 → #52303f → #35202c
-- Sparkles: 10 dots, #e8c4cc color
-- Large camera SVG icon, centered, no circle wrapper
+- Sparkles: 60 dots, #e8c4cc color, delays 0–6000ms, randomized loop gaps
+- Large camera SVG icon (96px), no circle wrapper, centered via flex justifyContent/alignItems center. viewBox adjusted so lens is centered.
 - Animated prompts cycle in #9898d6
-- "Be honest. Be direct." above record button
+- "Be honest. Be direct. Your future self is listening." above record button
 - No skip button — forces first recording
 
 ### RecordScreen
 - Full-screen camera, front-facing by default
 - useSafeAreaInsets() for header and controls — NOT SafeAreaView
 - Thought bubble: frosted pill (rgba(255,255,255,0.15)), fonts.inter (NOT bold), fontSize: 14
+  - position: absolute, top: 128, left: 70, right: 70
+  - borderWidth: 1, borderColor: rgba(255,255,255,0.25)
+  - Text: "What would you like your future self to know?"
+  - Pulsates: scale 1 → 1.09 → 1 over 1.7s loop. Hidden while recording.
 - 12 spell-checked script prompts
 - useFocusEffect cleanup: stops camera + recording on navigate away
 - isMountedRef guards all state updates
@@ -189,6 +216,7 @@ Home
 - currentX ref (via listener) tracks live position — used on grant to avoid jump on interrupted animations
 - onMoveShouldSetPanResponder: dx > 10 AND dx > dy * 2 — prevents vertical taps triggering swipe
 - Snap: currentX < -52 or vx < -0.5
+- Delete zone stays visible while BrandAlert confirmation is open. Scrolling the list closes/resets the delete zone.
 
 #### Drag-to-reorder (DraggableList)
 - ROOT CAUSE OF DRAG FAILURE: Long-press timer inside PanResponder was cancelled by iOS
@@ -196,6 +224,7 @@ Home
 - FIX: Use Pressable onLongPress (OS-level, reliable) for activation. Shared PanResponder
   handles movement only AFTER isDraggingRef is set. The two are fully decoupled.
 - delayLongPress={400} on Pressable
+- No 3-dot handle — long-press anywhere on the card activates drag (users are smart enough)
 - onMoveShouldSetPanResponder + onMoveShouldSetPanResponderCapture both return isDraggingRef.current
 - Grabbed card: scale 1.05 spring + shadow elevation lift
 - Hover feedback: target slot card plays 3-step shake (±4px)
@@ -380,15 +409,15 @@ Only these two:
 - Splash isFirstTime: App.tsx fix is in place (null guard + async resolution before render).
   However stale onboarding flag in AsyncStorage from previous test runs may cause returning
   user behaviour until storage is cleared. Fix: temporarily add AsyncStorage.clear() to
-  prepare() function, run once, then remove.
-- Multi-video trigger queue: two past-due videos → one triggers, second fires 30s later
+  prepare() function, run once, then remove. Do NOT leave in production.
+- Multi-video trigger queue: if two or more videos are past-due simultaneously, only one triggers per check cycle. The second fires 30s later. Root cause: the trigger loop exits after the first triggered video to avoid navigating twice. Fix requires HomeScreen context to implement safely — not yet attempted. Low severity.
 
 ### TODO Before App Store
-- App Guard native implementation (iOS: Screen Time API, Android: accessibility service)
-- Background notifications
-- Login prompt after first save
+- App Guard native implementation (iOS: Screen Time API / lock screen intercept, Android: accessibility service) — this is the *original vision* of the app, not just an app-open trigger
+- Background notifications (expo-notifications is installed but not wired)
+- Login prompt after first video saved (peak emotional investment moment)
 - Cloud backup
-- Android testing
+- Android testing (developed primarily on iOS)
 
 ---
 
@@ -396,8 +425,31 @@ Only these two:
 
 - **Free tier:** limited recordings, date/time trigger only, no repeat
 - **Past.Self. Pro — €8.99 one-time:** unlimited videos, App Guard (when built), repeat scheduling
-- No ads, ever
+- No ads, ever — non-negotiable, ads destroy the emotional tone
 - Login prompt after first video saved — not yet implemented
+
+---
+
+## Development Environment
+
+**Primary machines:** Windows (PowerShell) + MacBook
+
+**PowerShell note:** `&&` is not a valid statement separator in PowerShell. Run commands separately:
+```powershell
+git add .
+git commit -m "your message"
+git push
+```
+
+**Mac setup:**
+```bash
+git clone https://github.com/OmnifySolutions/Past.Self.App.git
+cd Past.Self.App
+npm install
+npx expo start --clear
+```
+
+Phone must be on the same WiFi as the Mac. Scan QR code with camera (iOS) or Expo Go app (Android).
 
 ---
 
@@ -410,9 +462,11 @@ npx expo install [package]  # Install respecting SDK version
 
 ---
 
-## How to Start a New Claude Session
+## How to Start a New Session
 
-1. Copy this file's contents
-2. Start new conversation
-3. Paste with: "This is the complete context for Past.Self., a React Native app I'm building. Please read it fully — especially the Core Instructions — before we continue."
-4. GitHub: https://github.com/OmnifySolutions/Past.Self.App
+This CLAUDE.md is set as the Project Instructions — Claude reads it automatically at the start of every conversation in the Past.Self. project. No need to paste it manually.
+
+If starting outside the project for any reason, paste the contents with:
+> "This is the complete context for Past.Self., a React Native app I'm building. Please read it fully — especially the Core Instructions — before we continue."
+
+GitHub: https://github.com/OmnifySolutions/Past.Self.App
