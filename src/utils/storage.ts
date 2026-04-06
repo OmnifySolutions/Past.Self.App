@@ -82,3 +82,17 @@ export const isOnboarded = async (): Promise<boolean> => {
 export const setOnboarded = async (): Promise<void> => {
   await AsyncStorage.setItem(ONBOARDED_KEY, 'true');
 };
+
+// ─── Login prompt ─────────────────────────────────────────────────────────────
+// One-time flag — shown once on ConfirmationScreen after first save.
+// Never shown again regardless of whether user signed in or dismissed.
+const LOGIN_PROMPT_KEY = 'pastself_login_prompted';
+
+export const hasSeenLoginPrompt = async (): Promise<boolean> => {
+  const val = await AsyncStorage.getItem(LOGIN_PROMPT_KEY);
+  return val === 'true';
+};
+
+export const setLoginPromptSeen = async (): Promise<void> => {
+  await AsyncStorage.setItem(LOGIN_PROMPT_KEY, 'true');
+};

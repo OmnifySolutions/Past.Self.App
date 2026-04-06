@@ -64,7 +64,6 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export default function App() {
   const [appReady, setAppReady] = useState(false);
-  // FIX: isFirst starts as null — we don't render until we know the real value
   const [isFirst, setIsFirst] = useState<boolean | null>(null);
 
   const navigationRef = useRef<NavigationContainerRef<RootStackParamList>>(null);
@@ -102,16 +101,14 @@ export default function App() {
           Inter_500Medium,
         });
         const onboarded = await isOnboarded();
-        // FIX: set isFirst only after async resolution — this is the real value
         setIsFirst(!onboarded);
       } catch (e) {
-        console.warn('[App] Font loading failed — using system fonts:', e);
-        // FIX: still need to set isFirst even on error so app doesn't hang
+        console.warn('[App] prepare() failed:', e);
         try {
           const onboarded = await isOnboarded();
           setIsFirst(!onboarded);
         } catch {
-          setIsFirst(false); // safe fallback: treat as returning user
+          setIsFirst(false);
         }
       } finally {
         setAppReady(true);
@@ -126,9 +123,6 @@ export default function App() {
     }
   }, [appReady]);
 
-  // FIX: Don't render until both fonts are loaded AND we know onboarding state.
-  // Previously isFirst defaulted to `true` and initialParams fired before
-  // isOnboarded() resolved — so returning users always saw the first-time splash.
   if (!appReady || isFirst === null) return null;
 
   return (
@@ -140,11 +134,6 @@ export default function App() {
             initialRouteName="Splash"
             screenOptions={{ headerShown: false, animation: 'fade' }}
           >
-            {/*
-              FIX: Pass isFirstTime via initialParams AFTER async resolution.
-              Because isFirst is now settled before render, initialParams is
-              correct on first mount — no race condition.
-            */}
             <Stack.Screen
               name="Splash"
               component={AppSplash}

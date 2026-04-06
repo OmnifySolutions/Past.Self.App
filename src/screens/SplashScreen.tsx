@@ -1058,7 +1058,9 @@ const SPARKLES = [
 
 export function SplashScreen({ navigation, route }: Props) {
   const isFirstTime = route.params?.isFirstTime ?? true;
-  const [phraseIndex, setPhraseIndex] = useState(0);
+  // Returning users: initialise to last phrase so the correct text is on screen from frame one.
+  // First-time users: 0 is correct — runPhrase() sets it before animating.
+  const [phraseIndex, setPhraseIndex] = useState(isFirstTime ? 0 : PHRASES.length - 1);
   const [showButton, setShowButton] = useState(false);
   const activeRef = useRef(true);
   const doneRef = useRef(false);
@@ -1077,13 +1079,15 @@ export function SplashScreen({ navigation, route }: Props) {
   useEffect(() => {
     activeRef.current = true;
     if (!isFirstTime) {
+      // Show header + last phrase immediately (no slide-in animation for phrase)
+      phraseOpacity.setValue(1);
+      phraseX.setValue(0);
       Animated.sequence([
-        Animated.delay(200),
         Animated.parallel([
-          Animated.timing(headerOpacity, { toValue: 1, duration: 600, useNativeDriver: true }),
-          Animated.timing(headerY, { toValue: 0, duration: 600, useNativeDriver: true }),
+          Animated.timing(headerOpacity, { toValue: 1, duration: 500, useNativeDriver: true }),
+          Animated.timing(headerY,      { toValue: 0, duration: 500, useNativeDriver: true }),
         ]),
-        Animated.delay(800),
+        Animated.delay(1200),
       ]).start(() => navigation.replace('Home'));
       return;
     }

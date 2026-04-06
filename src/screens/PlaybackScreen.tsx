@@ -24,15 +24,12 @@ function PlayerView({
   navigation: Props['navigation'];
 }) {
   const insets = useSafeAreaInsets();
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration]       = useState(0);
+  const [currentTime, setCurrentTime]     = useState(0);
+  const [duration, setDuration]           = useState(0);
   const [videoFinished, setVideoFinished] = useState(false);
-  const skipOpacity   = useRef(new Animated.Value(0)).current;
-  const watchTimer    = useRef<NodeJS.Timeout | null>(null);
-
-  // FIX: Removed useBrandAlert() — it was called but showAlert/hideAlert were
-  // never wired up, making it dead code. BrandAlert removed from this screen.
-  // If error handling is needed here in future, wire up showAlert properly.
+  const [isMuted, setIsMuted]             = useState(false);   // session-only, no persistence
+  const skipOpacity  = useRef(new Animated.Value(0)).current;
+  const watchTimer   = useRef<NodeJS.Timeout | null>(null);
 
   const player = useVideoPlayer({ uri: video.videoUri }, p => {
     p.timeUpdateEventInterval = 0.5;
@@ -68,10 +65,13 @@ function PlayerView({
     return () => { if (watchTimer.current) clearInterval(watchTimer.current); };
   }, [isTriggered]);
 
+  const handleMuteToggle = () => {
+    const next = !isMuted;
+    setIsMuted(next);
+    player.muted = next;
+  };
+
   const handleDone = async () => {
-    // FIX: Removed the datetime one-shot branch — checkScheduledVideos() already
-    // marks the video inactive before this screen opens. Double-writing is wrong.
-    // Only the appTrigger.playOnce case needs action here (marking hasPlayed).
     if (video.appTrigger?.playOnce && !video.appTrigger.hasPlayed) {
       await updateVideo(video.id, {
         appTrigger: { ...video.appTrigger, hasPlayed: true },
@@ -90,6 +90,7 @@ function PlayerView({
   };
 
   const showDoneButton = isTriggered ? videoFinished : true;
+  const topOffset = insets.top + spacing.md;
 
   return (
     <View style={styles.container}>
@@ -99,9 +100,24 @@ function PlayerView({
         nativeControls={false}
       />
 
+      {/* Volume toggle — top-left, always visible, Instagram-style */}
+      <TouchableOpacity
+        style={[styles.volumeBtn, { top: topOffset }]}
+        onPress={handleMuteToggle}
+        activeOpacity={0.85}
+        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+      >
+        <Ionicons
+          name={isMuted ? 'volume-mute' : 'volume-medium'}
+          size={20}
+          color="rgba(255,255,255,0.85)"
+        />
+      </TouchableOpacity>
+
+      {/* Skip button — top-right, triggered mode only, appears after 5s */}
       {isTriggered && (
         <Animated.View
-          style={[styles.skipBtn, { top: insets.top + spacing.md, opacity: skipOpacity }]}
+          style={[styles.skipBtn, { top: topOffset, opacity: skipOpacity }]}
         >
           <TouchableOpacity onPress={handleDone} activeOpacity={0.85} style={styles.skipTouchable}>
             <Text style={styles.skipText}>Skip</Text>
@@ -153,14 +169,27 @@ export function PlaybackScreen({ route, navigation }: Props) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
-  skipBtn: { position: 'absolute', right: spacing.lg },
+
+  // Volume button: top-left, pill-shaped, matches skip button aesthetic
+  volumeBtn: {
+    position: 'absolute',
+    left: spacing.lg,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: radius.full,
+    padding: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+
+  skipBtn:       { position: 'absolute', right: spacing.lg },
   skipTouchable: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
     backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: radius.full,
     paddingHorizontal: spacing.md, paddingVertical: 6,
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)',
   },
-  skipText:     { fontFamily: fonts.inter, fontSize: 13, color: 'rgba(255,255,255,0.7)' },
+  skipText: { fontFamily: fonts.inter, fontSize: 13, color: 'rgba(255,255,255,0.7)' },
+
   bottomOverlay: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
     padding: spacing.lg, backgroundColor: 'rgba(0,0,0,0.5)', gap: spacing.sm,
@@ -168,12 +197,12 @@ const styles = StyleSheet.create({
   progressTrack: {
     height: 3, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: radius.full,
   },
-  progressFill: { height: '100%', backgroundColor: '#9898d6', borderRadius: radius.full },
-  timeRow:      { flexDirection: 'row', justifyContent: 'space-between' },
-  timeText:     { fontFamily: fonts.inter, fontSize: 12, color: 'rgba(255,255,255,0.6)' },
-  doneBtn:      {
+  progressFill:  { height: '100%', backgroundColor: '#9898d6', borderRadius: radius.full },
+  timeRow:       { flexDirection: 'row', justifyContent: 'space-between' },
+  timeText:      { fontFamily: fonts.inter, fontSize: 12, color: 'rgba(255,255,255,0.6)' },
+  doneBtn: {
     backgroundColor: colors.accent, borderRadius: radius.lg,
     padding: spacing.md, alignItems: 'center', marginTop: spacing.sm,
   },
-  doneBtnText:  { fontFamily: fonts.montserratBold, fontSize: 15, color: '#fff' },
+  doneBtnText: { fontFamily: fonts.montserratBold, fontSize: 15, color: '#fff' },
 });
