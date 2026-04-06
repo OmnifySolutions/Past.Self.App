@@ -183,8 +183,8 @@ const DraggableList = ({
   useEffect(() => { orderedIdsRef.current = orderedIds; }, [orderedIds]);
 
   // Per-item animated values — must exist before PanResponders are created
-  const scaleAnims = useRef<Record<string, Animated.Value>>({});
-  const slideAnims = useRef<Record<string, Animated.Value>>({});
+  const scaleAnims  = useRef<Record<string, Animated.Value>>({});
+  const slideAnims  = useRef<Record<string, Animated.Value>>({});
   const jiggleAnims = useRef<Record<string, Animated.Value>>({});
 
   const ensureAnims = (id: string) => {
@@ -193,12 +193,12 @@ const DraggableList = ({
     if (!jiggleAnims.current[id]) jiggleAnims.current[id] = new Animated.Value(0);
   };
 
-  // Ensure all current items have anims before render
   orderedIds.forEach(ensureAnims);
 
   useEffect(() => {
     const incomingIds = items.map(i => i.id);
-    const sameSet = incomingIds.length === orderedIds.length && incomingIds.every(id => orderedIds.includes(id));
+    const sameSet = incomingIds.length === orderedIds.length &&
+      incomingIds.every(id => orderedIds.includes(id));
     if (!sameSet) setOrderedIds(incomingIds);
   }, [items]);
 
@@ -218,9 +218,7 @@ const DraggableList = ({
   };
 
   const resetSlideAnims = () => {
-    Object.values(slideAnims.current).forEach(anim =>
-      Animated.spring(anim, { toValue: 0, useNativeDriver: true, bounciness: 3 }).start()
-    );
+    Object.values(slideAnims.current).forEach(anim => anim.setValue(0));
   };
 
   const updateSlideAnims = (fromIdx: number, toIdx: number) => {
@@ -229,10 +227,8 @@ const DraggableList = ({
       if (!slideAnims.current[id]) return;
       let shift = 0;
       if (fromIdx < toIdx) {
-        // dragging down — cards between from+1 and to slide up
         if (idx > fromIdx && idx <= toIdx) shift = -CARD_HEIGHT;
       } else {
-        // dragging up — cards between to and from-1 slide down
         if (idx >= toIdx && idx < fromIdx) shift = CARD_HEIGHT;
       }
       Animated.spring(slideAnims.current[id], {
@@ -250,42 +246,39 @@ const DraggableList = ({
 
     const ids  = orderedIdsRef.current;
     const from = ids.indexOf(id);
-    const to   = Math.max(0, Math.min(ids.length - 1, from + Math.round(finalDy / CARD_HEIGHT)));
+    const to   = Math.max(0, Math.min(ids.length - 1,
+      from + Math.round(finalDy / CARD_HEIGHT)));
 
-    // Snap scale back
-    Animated.spring(scaleAnims.current[id], { toValue: 1, useNativeDriver: true, bounciness: 6 }).start();
-
-    // Reset all slide anims
-    resetSlideAnims();
+    Animated.spring(scaleAnims.current[id], {
+      toValue: 1, useNativeDriver: true, bounciness: 6,
+    }).start();
 
     dragY.setValue(0);
-    draggingId.current = null;
+    draggingId.current   = null;
     lastHoverIdx.current = null;
     setActiveId(null);
     setHoverIndex(null);
     onScrollEnable(true);
 
     if (to !== from) {
-      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-      setOrderedIds(prev => {
-        const next = [...prev];
-        const [moved] = next.splice(from, 1);
-        next.splice(to, 0, moved);
-        onReorder(next.map(id2 => items.find(i => i.id === id2)!).filter(Boolean));
-        return next;
-      });
+      const next = [...ids];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      orderedIdsRef.current = next;
+      resetSlideAnims();
+      setOrderedIds(next);
+      onReorder(next.map(id2 => items.find(i => i.id === id2)!).filter(Boolean));
+    } else {
+      resetSlideAnims();
     }
   };
 
-  // PanResponders stored here — created in useEffect, NEVER during render
   const panResponders = useRef<Record<string, ReturnType<typeof PanResponder.create>>>({});
 
   useEffect(() => {
-    // (Re)create PanResponders whenever orderedIds changes.
-    // Using refs for everything so closures always see fresh values.
     orderedIds.forEach(id => {
       panResponders.current[id] = PanResponder.create({
-        onStartShouldSetPanResponder: () => true,
+        onStartShouldSetPanResponder:        () => true,
         onStartShouldSetPanResponderCapture: () => true,
         onPanResponderGrant: () => {
           if (isDraggingRef.current) return;
@@ -297,7 +290,9 @@ const DraggableList = ({
           onScrollEnable(false);
           setActiveId(id);
           if (scaleAnims.current[id]) {
-            Animated.spring(scaleAnims.current[id], { toValue: 1.05, useNativeDriver: true, bounciness: 8 }).start();
+            Animated.spring(scaleAnims.current[id], {
+              toValue: 1.05, useNativeDriver: true, bounciness: 8,
+            }).start();
           }
         },
         onPanResponderMove: (_, g) => {
@@ -305,16 +300,15 @@ const DraggableList = ({
           dragY.setValue(g.dy);
           lastGestureY.current = g.dy;
 
-          // Compute hover index and update slide anims
           const ids  = orderedIdsRef.current;
           const from = ids.indexOf(id);
-          const to   = Math.max(0, Math.min(ids.length - 1, from + Math.round(g.dy / CARD_HEIGHT)));
+          const to   = Math.max(0, Math.min(ids.length - 1,
+            from + Math.round(g.dy / CARD_HEIGHT)));
 
           if (to !== lastHoverIdx.current) {
             lastHoverIdx.current = to;
             setHoverIndex(to);
             updateSlideAnims(from, to);
-            // Jiggle the card at the landing slot (not the dragged card)
             if (to !== from && ids[to]) playJiggle(ids[to]);
           }
         },
@@ -328,7 +322,6 @@ const DraggableList = ({
         },
       });
     });
-    // Cleanup removed ids
     Object.keys(panResponders.current).forEach(id => {
       if (!orderedIds.includes(id)) delete panResponders.current[id];
     });
@@ -353,20 +346,16 @@ const DraggableList = ({
               isDragging && s.draggableRowLifted,
               {
                 transform: [
-                  // Dragged card follows finger; others slide to make room
                   { translateY: isDragging ? dragY : slideAnim },
                   { scale: scaleAnim },
-                  // Jiggle is horizontal on the non-dragged target card
                   { translateX: isDragging ? 0 : jiggleAnim },
                 ],
               },
             ]}
           >
-            {/* Six-dot drag handle — has its own PanResponder, starts drag immediately */}
             <View style={s.dragHandle} {...(pr ? pr.panHandlers : {})}>
               <DragDots />
             </View>
-
             <View style={s.draggableCardWrap}>
               {renderItem(item)}
             </View>
@@ -868,7 +857,7 @@ const s = StyleSheet.create({
     shadowOpacity: 0.2, shadowRadius: 12, elevation: 12,
   },
   // Handle: tall enough touch target, horizontally compact
-  dragHandle:      { paddingHorizontal: spacing.xs, paddingVertical: spacing.md, justifyContent: 'center', alignItems: 'center' },
+  dragHandle:        { paddingHorizontal: spacing.xs, paddingVertical: spacing.md, justifyContent: 'center', alignItems: 'center' },
   draggableCardWrap: { flex: 1 },
 
   card: {

@@ -32,12 +32,19 @@
         "READ_EXTERNAL_STORAGE",
         "WRITE_EXTERNAL_STORAGE",
         "RECEIVE_BOOT_COMPLETED",
-        "VIBRATE"
+        "VIBRATE",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "plugins": [
       "expo-camera",
       "expo-video"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "56026d97-0011-437b-ae8e-8f5ff2f3c803"
+      }
+    }
   }
 }

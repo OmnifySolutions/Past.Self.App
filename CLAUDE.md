@@ -17,6 +17,10 @@ This means:
 - Flag technical debt, inconsistencies, and risks proactively
 - Never just agree to be agreeable
 - **Never guess.** If information is needed to complete a task correctly — a file, a timing value, a behaviour, anything — ask for it. Guessing produces worse results than asking. Always.
+- **Responses:** Skip the step-by-step diagnosis narration. Just give a summary of what changed and why at the end.
+- **Platform default:** Dary is on Windows/PC by default. Never assume Mac unless explicitly told.
+- **Reverting:** When asked to revert to a previous version, reverse-engineer it from the changes made in the current session. Don't claim it's impossible.
+- **Push reminder:** After any working state, remind Dary to push to GitHub immediately. That is the only undo button.
 
 **GitHub repo:** https://github.com/OmnifySolutions/Past.Self.App (public)
 
@@ -60,6 +64,7 @@ To get a raw URL: open the file on GitHub → click "Raw" → copy that URL and 
   - useEventListener(player, 'timeUpdate', callback) for progress tracking
   - useEventListener(player, 'playToEnd', callback) for end detection
   - Set player.timeUpdateEventInterval = 0.5 in the player init callback
+  - player.pause() calls must be wrapped in try/catch — player may already be released on unmount
 - **File system:** expo-file-system/legacy (use /legacy import — base API is deprecated)
 - **Thumbnails:** expo-video-thumbnails — generates real frames from permanent video file at save time
   - ⚠️ May not be in package.json yet — if missing, run: `npx expo install expo-video-thumbnails`
@@ -67,6 +72,10 @@ To get a raw URL: open the file on GitHub → click "Raw" → copy that URL and 
 - **Gradient:** expo-linear-gradient
 - **Safe Area:** react-native-safe-area-context — use useSafeAreaInsets() hook EVERYWHERE. NEVER use React Native's SafeAreaView — causes pink status bar gap on iOS.
 - **Fonts:** @expo-google-fonts/dancing-script, @expo-google-fonts/montserrat, @expo-google-fonts/inter
+  - ⚠️ Fonts are loaded from LOCAL FILES in assets/fonts/ — NOT from the Google Fonts packages at runtime.
+  - Font files copied from node_modules into assets/fonts/ and loaded via require() in App.tsx.
+  - This prevents the 2-3 minute hang on first launch of a standalone build (network fetch stall).
+  - Font keys remain identical: DancingScript_700Bold, Montserrat_500Medium, etc.
 - **Icons:** @expo/vector-icons (Ionicons)
 - **SVG:** react-native-svg
 - **Gestures:** react-native-gesture-handler
@@ -88,6 +97,9 @@ PastSelfApp/
 ├── App.tsx                    # Root navigation, font loading, trigger interval
 ├── app.json                   # Expo config — plugins: expo-camera, expo-video only
 ├── CLAUDE.md                  # This file
+├── assets/
+│   ├── fonts/                 # Local font files — DancingScript-Bold.ttf, Inter-Regular.ttf, etc.
+│   └── SparklesBG.mp4         # Looping sparkle video background for SplashScreen (2.7MB, ping-pong)
 └── src/
     ├── screens/
     │   ├── SplashScreen.tsx
@@ -176,13 +188,20 @@ Home
 ## Screen Descriptions
 
 ### SplashScreen
-- Background: LinearGradient #fdf4f5 → #f8e8ed → #e8c0cd
-- Sparkles: ~550 animated white dots, randomized delays and loop gaps
-- Header: "What if your" / "Past.Self." (Dancing Script 56, #674454) / "could..."
-- Cycling phrases in #9898d6: procrastinating → bad habits → why you started → wasting time
-- Phrase animation: slide in (320ms) → hold (1400ms) → fade out (280ms). Next phrase starts ONLY in the fade-out completion callback — not via setTimeout — to prevent flicker.
-- Last phrase stays; "Try It Now!" button fades in with pulse + white glow
-- **Returning users:** phraseIndex initialised to PHRASES.length - 1 in useState (NOT set via setState after mount — that caused a flash of phrase 0). Header fades in (500ms), last phrase shown immediately with no slide animation, 1200ms hold, then navigates to Home. Total ~1.7s.
+- **Background:** Full-screen MP4 video (`assets/SparklesBG.mp4`) — sparkle/bokeh animation, ping-pong looped (A→B→A baked into the video file). Replaces the old LinearGradient + 550 Sparkle components entirely.
+- Video plays via expo-video: `player.loop = true`, `player.muted = true`, `contentFit="cover"`, `nativeControls={false}`
+- White cover view sits on top until `statusChange → readyToPlay` fires — prevents black flash on mount
+- player.pause() wrapped in try/catch on unmount — prevents "already released" error on Android
+- **Two-component pattern:** `SplashScreen` (outer, manages cover) + `SplashInner` (inner, has useVideoPlayer at top level)
+- Overlay: `rgba(253, 244, 245, 0.25)` tint over video so text stays readable
+- Header: "What if your" / "Past.Self." (Dancing Script 56, #674454, lineHeight: 76 — increased from 62 to prevent "f" descender clipping) / "could..."
+- Cycling phrases in #9898d6 — no period at end except last phrase which keeps `...`
+- Phrase timing: SLIDE_MS 260, HOLD_MS 1100, FADE_MS 220 (slightly faster than original)
+- Phrase sequencing: next phrase starts ONLY after fade-out completes (finished callback) — no overlap
+- **"Try It Now!" button:** LinearGradient background `#674454 → #a194a8` (left to right). Three-layer diagonal shimmer effect sweeps right-to-left every ~5s (2800ms pause, 2200ms sweep). Shimmer layers use `left: 0, right: 0` full button width with gradient stops tightly clustered around 0.5 for narrow diffused band. SHIMMER_OVERSHOOT = 120 for diagonal angle.
+- Pulse animation on button: scale 1→1.055→1, glowOpacity 0.2→1→0.2, 1000ms each direction
+- **Returning users:** phrase shown immediately, header fades in 500ms, holds 1200ms, navigates to Home. Total ~1.7s.
+- **First-time users:** header animates in, then phrases cycle, last phrase stays, button fades in with shimmer+pulse.
 
 ### OnboardingCameraScreen
 - Background: LinearGradient #6b3f52 → #52303f → #35202c
@@ -273,13 +292,15 @@ Home
 - FIX: Use Pressable onLongPress (OS-level, reliable) for activation. Shared PanResponder
   handles movement only AFTER isDraggingRef is set. The two are fully decoupled.
 - delayLongPress={400} on Pressable
-- No 3-dot handle — long-press anywhere on the card activates drag (users are smart enough)
+- Six-dot handle (DragDots SVG) — drag activates only via the handle
 - onMoveShouldSetPanResponder + onMoveShouldSetPanResponderCapture both return isDraggingRef.current
 - Grabbed card: scale 1.05 spring + shadow elevation lift
-- Hover feedback: target slot card plays 3-step shake (±4px)
+- Hover feedback: target slot card plays 3-step shake (±3px)
 - During drag: card renders WITHOUT SwipeableCard wrapper — prevents delete zone bleed-through
 - orderedIdsRef keeps live order for PanResponder closures without stale captures
 - onScrollEnable(false) during drag, restored on release/terminate
+- **setState-in-render fix:** onReorder is called OUTSIDE the setOrderedIds updater. Previously calling it inside caused "Cannot update a component while rendering a different component" error.
+- **Release:** orderedIdsRef updated synchronously before setOrderedIds. resetSlideAnims uses setValue(0) — instant snap, no spring animation on release to prevent jump conflict.
 
 #### How It Works
 - alignSelf: 'center', width: '88%', marginBottom: spacing.lg — NOT full width, has bottom margin
@@ -449,13 +470,21 @@ const [isFirst, setIsFirst] = useState<boolean | null>(null);
 if (!appReady || isFirst === null) return null; // hold render until resolved
 ```
 
-### Splash Phrase Flicker Fix (CRITICAL)
+### Font Loading (CRITICAL)
 
-Two fixes applied — do not revert:
+Fonts are loaded from local files — NOT from the Google Fonts packages at runtime:
 
-1. **phraseIndex init:** `useState(isFirstTime ? 0 : PHRASES.length - 1)` — returning users get the correct phrase from frame one. Never `useState(0)` unconditionally.
+```typescript
+await Font.loadAsync({
+  DancingScript_700Bold: require('./assets/fonts/DancingScript-Bold.ttf'),
+  Montserrat_500Medium:  require('./assets/fonts/Montserrat-Medium.ttf'),
+  Montserrat_700Bold:    require('./assets/fonts/Montserrat-Bold.ttf'),
+  Inter_400Regular:      require('./assets/fonts/Inter-Regular.ttf'),
+  Inter_500Medium:       require('./assets/fonts/Inter-Medium.ttf'),
+});
+```
 
-2. **Next phrase sequencing:** The next phrase is called ONLY inside the fade-out `.start()` completion callback, after explicitly resetting `phraseOpacity.setValue(0)` and `phraseX.setValue(width * 0.45)`. Never via `setTimeout(..., 0)` while the fade is still running — that caused mid-fade opacity bleed-through.
+The Google Fonts package imports (DancingScript_700Bold from '@expo-google-fonts/...') are removed from App.tsx. Loading from network caused 2-3 minute hang on first install of standalone build.
 
 ### Video Storage
 
@@ -535,16 +564,18 @@ Clamps to last day of month: detects overflow via next.getDate() !== originalDay
 
 ## Testing
 
-### Expo Go (current)
-- Run: `npx expo start --clear` on Mac, scan QR with phone
+### Development (PC — default)
+- Dary is on Windows/PC by default
+- Run `npx expo start --clear` on PC, scan QR with phone (same WiFi)
 - Use **"Reset app (dev)"** in Settings modal to test as new user
 - Expo Go CANNOT run custom native modules — needed for App Guard
 
-### Expo Development Build (next, for App Guard)
+### Expo Development Build (for App Guard)
 - Required once native Android AccessibilityService module is added
 - Build via EAS: `eas build --profile development --platform android`
-- Install the .apk on Android device, then scan QR as normal
+- Install the .apk on Android device, then connect to Metro via QR
 - EAS account: created at expo.dev
+- ⚠️ Any change to bundled assets (fonts, videos) or native packages requires a new EAS build
 
 ### Dev reset
 The **"Reset app (dev)"** row in Settings modal (`__DEV__ === true` only):
@@ -576,19 +607,22 @@ Do NOT add any other reset mechanisms.
 - app.json: icon + splash + android adaptive icon all pointing to App_Icon.png
 - Brand identity locked: colors, typography, icon concept, brand voice
 - HomeScreen SwipeableCard: fully working swipe-to-delete
-- HomeScreen DraggableList: six-dot handle drag-to-reorder
+- HomeScreen DraggableList: six-dot handle drag-to-reorder, setState-in-render fixed, release jump fixed
 - HomeScreen card visual polish (shadows, borders, paused states)
 - Thumbnail bug (PS-1): permanent URI via expo-video-thumbnails at save time — confirmed working
 - Settings modal: animated bottom sheet, periwinkle (#9898d6) icon squares, pink icons, dev reset row, paddingTop spacing.lg
 - Settings modal: Rate Past.Self. and Send feedback rows wired with Linking.openURL
 - Login prompt: one-time modal on ConfirmationScreen, locked copy, both buttons mark as seen
-- SplashScreen returning user path: ~1.7s, phraseIndex initialised correctly, no flicker, no wasted time
+- **SplashScreen:** MP4 video background (SparklesBG.mp4), shimmer gradient button, faster phrases, fixed font clipping, returning user path ~1.7s
+- **Fonts:** loaded from local assets/fonts/ — no network fetch, instant load on standalone build
+- Android Development Build: APK installed on device, tested
 
 ### Known Issues / Pending
 - Multi-video trigger queue: if two or more videos are past-due simultaneously, only one triggers per check cycle. The second fires 30s later. Low severity.
 - Settings modal rows (Account, Cloud backup, Notifications, App Guard, About) are stubs — close modal on tap. Wire up as features are built.
 - Login prompt sign-in handler is a stub — needs real auth screen when backend exists.
 - Rate Past.Self. URL: `idYOUR_APP_ID` placeholder — swap for real App Store ID at submission.
+- Shimmer button edges have a very slight hard clip on Android — inherent `overflow:hidden` limitation, not fixable without Skia. Leave as-is.
 
 ### TODO Before App Store
 - **App Guard — Android** (next major feature): custom Expo module, Android AccessibilityService, Expo Development Build
@@ -613,7 +647,7 @@ Do NOT add any other reset mechanisms.
 
 ## Development Environment
 
-**Primary machines:** Windows (PowerShell) + MacBook
+**Primary machine: Windows PC (PowerShell).** Only use Mac-specific instructions if Dary explicitly says he's on Mac.
 
 **PowerShell note:** `&&` is not a valid statement separator in PowerShell. Run commands separately:
 ```powershell
@@ -622,24 +656,14 @@ git commit -m "your message"
 git push
 ```
 
-**Mac setup:**
-```bash
-git clone https://github.com/OmnifySolutions/Past.Self.App.git
-cd Past.Self.App
-npm install
-npx expo start --clear
-```
-
-Phone must be on the same WiFi as the Mac. Scan QR code with camera (iOS) or Expo Go app (Android).
-
 ---
 
 ## Commands
 
-```bash
+```powershell
 npx expo start --clear                                    # Start dev server, clear cache
 npx expo install [package]                                # Install respecting SDK version
-eas build --profile development --platform android        # Build Android dev client (for App Guard)
+eas build --profile development --platform android        # Build Android dev client
 eas build --profile development --platform ios            # Build iOS dev client
 ```
 

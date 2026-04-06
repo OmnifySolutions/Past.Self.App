@@ -7,9 +7,6 @@ import * as SplashScreen from 'expo-splash-screen';
 import * as Font from 'expo-font';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { DancingScript_700Bold } from '@expo-google-fonts/dancing-script';
-import { Montserrat_500Medium, Montserrat_700Bold } from '@expo-google-fonts/montserrat';
-import { Inter_400Regular, Inter_500Medium } from '@expo-google-fonts/inter';
 import { isOnboarded, checkScheduledVideos } from './src/utils/storage';
 import { SplashScreen as AppSplash } from './src/screens/SplashScreen';
 import { OnboardingCameraScreen } from './src/screens/OnboardingCameraScreen';
@@ -94,16 +91,16 @@ export default function App() {
     async function prepare() {
       try {
         await Font.loadAsync({
-          DancingScript_700Bold,
-          Montserrat_500Medium,
-          Montserrat_700Bold,
-          Inter_400Regular,
-          Inter_500Medium,
+          DancingScript_700Bold: require('./assets/fonts/DancingScript-Bold.ttf'),
+          Montserrat_500Medium: require('./assets/fonts/Montserrat-Medium.ttf'),
+          Montserrat_700Bold: require('./assets/fonts/Montserrat-Bold.ttf'),
+          Inter_400Regular: require('./assets/fonts/Inter-Regular.ttf'),
+          Inter_500Medium: require('./assets/fonts/Inter-Medium.ttf'),
         });
         const onboarded = await isOnboarded();
         setIsFirst(!onboarded);
       } catch (e) {
-        console.warn('[App] prepare() failed:', e);
+        console.warn('[App] Font loading failed — using system fonts:', e);
         try {
           const onboarded = await isOnboarded();
           setIsFirst(!onboarded);
