@@ -5,6 +5,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 import * as Font from 'expo-font';
+import * as Notifications from 'expo-notifications';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { isOnboarded, checkScheduledVideos } from './src/utils/storage';
@@ -19,6 +20,27 @@ import { ConfirmationScreen } from './src/screens/ConfirmationScreen';
 import { RepeatOption } from './src/types/video';
 
 SplashScreen.preventAutoHideAsync();
+
+// Foreground handler: suppress — app is open, checkScheduledVideos handles it.
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: false,
+    shouldPlaySound: false,
+    shouldSetBadge: false,
+  }),
+});
+
+// Android channel — required for notifications on Android 8+.
+if (typeof Notifications.setNotificationChannelAsync === 'function') {
+  Notifications.setNotificationChannelAsync('pastself-triggers', {
+    name: 'Video Triggers',
+    importance: Notifications.AndroidImportance.MAX,
+    sound: 'default',
+    vibrationPattern: [0, 250, 250, 250],
+    enableLights: true,
+    showBadge: false,
+  });
+}
 
 export interface PrefillData {
   id?: string;
@@ -64,6 +86,7 @@ export default function App() {
   const [isFirst, setIsFirst] = useState<boolean | null>(null);
 
   const navigationRef = useRef<NavigationContainerRef<RootStackParamList>>(null);
+  const handledNotifRef = useRef<string | null>(null);
 
   const triggerPlayback = useCallback((videoId: string) => {
     if (navigationRef.current?.isReady()) {
@@ -81,11 +104,32 @@ export default function App() {
     const sub = AppState.addEventListener('change', state => {
       if (state === 'active') checkVideos();
     });
+
+    // Fires when user taps a notification while app is backgrounded/closed
+    const notifSub = Notifications.addNotificationResponseReceivedListener(response => {
+      const videoId = response.notification.request.content.data?.videoId as string | undefined;
+      if (videoId) triggerPlayback(videoId);
+    });
+
+    // Handle cold-start via notification tap (app was fully closed).
+    // We track the notification identifier so we only act on it once —
+    // response.notification.date is unreliable across Android versions.
+    Notifications.getLastNotificationResponseAsync().then(response => {
+      if (!response) return;
+      const identifier = response.notification.request.identifier;
+      const consumed = handledNotifRef.current;
+      if (consumed === identifier) return; // already handled this one
+      handledNotifRef.current = identifier;
+      const videoId = response.notification.request.content.data?.videoId as string | undefined;
+      if (videoId) setTimeout(() => triggerPlayback(videoId), 1000);
+    });
+
     return () => {
       clearInterval(interval);
       sub.remove();
+      notifSub.remove();
     };
-  }, [checkVideos]);
+  }, [checkVideos, triggerPlayback]);
 
   useEffect(() => {
     async function prepare() {

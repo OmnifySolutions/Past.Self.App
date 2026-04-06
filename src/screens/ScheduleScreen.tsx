@@ -11,7 +11,7 @@ import * as VideoThumbnails from 'expo-video-thumbnails';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Crypto from 'expo-crypto';
 import { RootStackParamList, PrefillData } from '../../App';
-import { saveVideo } from '../utils/storage';
+import { saveVideo, scheduleVideoNotification, cancelVideoNotification, getVideos } from '../utils/storage';
 import { ScheduledVideo, TriggerType, RepeatOption } from '../types/video';
 import { colors, fonts, spacing, radius } from '../styles/theme';
 import { BrandAlert, useBrandAlert } from '../components/BrandAlert';
@@ -37,7 +37,8 @@ export function ScheduleScreen({ route, navigation }: Props) {
   const [message, setMessage]       = useState(prefill?.message || '');
   const [triggerType, setTriggerType] = useState<TriggerType>(prefill?.triggerType || 'datetime');
   const [date, setDate]             = useState(prefill?.scheduledFor ? new Date(prefill.scheduledFor) : new Date(Date.now() + 3600000));
-  const [showPicker, setShowPicker] = useState(false);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
   const [repeat, setRepeat]         = useState<RepeatOption>(prefill?.repeat || 'never'); // FIX: RepeatOption
   const [selectedApp, setSelectedApp] = useState(prefill?.appName || '');
   const [playOnce, setPlayOnce]     = useState(prefill?.playOnce ?? true);
@@ -113,6 +114,13 @@ export function ScheduleScreen({ route, navigation }: Props) {
         permanentThumbnail = undefined;
       }
 
+      // Re-record path: cancel the previous notification if this video already had one
+      if (prefill?.id) {
+        const allVideos = await getVideos();
+        const old = allVideos.find(v => v.id === prefill.id);
+        if (old?.notificationId) await cancelVideoNotification(old.notificationId);
+      }
+
       const video: ScheduledVideo = {
         id: videoId,
         videoUri: permanentUri,
@@ -127,6 +135,13 @@ export function ScheduleScreen({ route, navigation }: Props) {
           : { appTrigger: { appName: selectedApp, playOnce, hasPlayed: false } }
         ),
       };
+
+      // Schedule local notification for datetime triggers — fires at exact time
+      // even when app is closed. Android uses full-screen intent (over lockscreen).
+      if (triggerType === 'datetime') {
+        const notificationId = await scheduleVideoNotification(video);
+        if (notificationId) video.notificationId = notificationId;
+      }
 
       await saveVideo(video);
 
@@ -229,22 +244,50 @@ export function ScheduleScreen({ route, navigation }: Props) {
 
         {triggerType === 'datetime' && (
           <View style={styles.section}>
-            <TouchableOpacity style={styles.dateDisplay} onPress={() => setShowPicker(true)} activeOpacity={0.85}>
+            {/* Split into separate date + time pickers — mode="datetime" causes black
+                screen on Android. Two separate pickers is the correct Android pattern. */}
+            <TouchableOpacity style={styles.dateDisplay} onPress={() => setShowDatePicker(true)} activeOpacity={0.85}>
               <Ionicons name="calendar-outline" size={18} color={colors.danger} />
+              <Text style={styles.dateText}>{date.toLocaleDateString()}</Text>
+              <Ionicons name="chevron-forward" size={16} color={colors.textLight} />
+            </TouchableOpacity>
+            {showDatePicker && (
+              <DateTimePicker
+                value={date}
+                mode="date"
+                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                minimumDate={new Date()}
+                onChange={(_, selected) => {
+                  setShowDatePicker(Platform.OS === 'ios');
+                  if (selected) {
+                    // Preserve existing time when only changing date
+                    const next = new Date(selected);
+                    next.setHours(date.getHours(), date.getMinutes(), 0, 0);
+                    setDate(next);
+                  }
+                }}
+              />
+            )}
+            <TouchableOpacity style={styles.dateDisplay} onPress={() => setShowTimePicker(true)} activeOpacity={0.85}>
+              <Ionicons name="time-outline" size={18} color={colors.danger} />
               <Text style={styles.dateText}>
-                {date.toLocaleDateString()} at {date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                {date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
               </Text>
               <Ionicons name="chevron-forward" size={16} color={colors.textLight} />
             </TouchableOpacity>
-            {showPicker && (
+            {showTimePicker && (
               <DateTimePicker
                 value={date}
-                mode="datetime"
+                mode="time"
                 display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                minimumDate={new Date()}
-                onChange={(_, s) => {
-                  setShowPicker(Platform.OS === 'ios');
-                  if (s) setDate(s);
+                onChange={(_, selected) => {
+                  setShowTimePicker(Platform.OS === 'ios');
+                  if (selected) {
+                    // Preserve existing date when only changing time
+                    const next = new Date(date);
+                    next.setHours(selected.getHours(), selected.getMinutes(), 0, 0);
+                    setDate(next);
+                  }
                 }}
               />
             )}

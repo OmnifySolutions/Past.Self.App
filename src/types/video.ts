@@ -10,6 +10,7 @@ export interface ScheduledVideo {
   createdAt: string;
   scheduledFor?: string;
   repeat?: RepeatOption;         // FIX: was `string`, now strictly typed
+  notificationId?: string;       // expo-notifications identifier — used to cancel on delete/edit
   appTrigger?: {
     appName: string;
     playOnce: boolean;

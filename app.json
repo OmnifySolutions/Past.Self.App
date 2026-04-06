@@ -33,13 +33,25 @@
         "WRITE_EXTERNAL_STORAGE",
         "RECEIVE_BOOT_COMPLETED",
         "VIBRATE",
+        "USE_FULL_SCREEN_INTENT",
+        "SCHEDULE_EXACT_ALARM",
+        "USE_EXACT_ALARM",
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO"
       ]
     },
     "plugins": [
       "expo-camera",
-      "expo-video"
+      "expo-video",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/App_Icon.png",
+          "color": "#674454",
+          "androidMode": "default",
+          "androidCollapsedTitle": "Past.Self."
+        }
+      ]
     ],
     "extra": {
       "eas": {

@@ -80,13 +80,24 @@ To get a raw URL: open the file on GitHub → click "Raw" → copy that URL and 
 - **SVG:** react-native-svg
 - **Gestures:** react-native-gesture-handler
 - **Date Picker:** @react-native-community/datetimepicker
+  - ⚠️ ALWAYS use separate `mode="date"` and `mode="time"` pickers — NEVER `mode="datetime"`. The combined mode causes a black screen on Android. Each picker preserves the other value when only one changes.
+- **Notifications:** expo-notifications
+  - Used for datetime trigger delivery only — fires at exact scheduled time even when app is closed
+  - Android: heads-up notification banner. Full-screen lockscreen interception deferred to App Guard native module (Android 14 does not reliably support fullScreenIntent via expo-notifications without a custom native module)
+  - iOS: standard tap-to-play notification (Apple does not allow forced full-screen for datetime triggers outside CallKit)
+  - `notificationId` stored per video in AsyncStorage for cancellation on delete/edit
+  - Notification channel: `pastself-triggers`, AndroidImportance.MAX
+  - Foreground handler suppresses notification UI (app handles playback inline when open)
+  - App.tsx uses `addNotificationResponseReceivedListener` + `getLastNotificationResponseAsync` with identifier-based deduplication (`handledNotifRef`) to prevent stale responses triggering videos prematurely
 
 ### Removed packages — do NOT re-add
 - expo-av — replaced by expo-video
-- expo-notifications — not yet wired up. Decision: simple push notifications rejected as primary trigger mechanism — a swipeable notification defeats the core product purpose. App Guard is the real solution.
 - expo-image-picker — not used
 - expo-media-library — not used
 - @react-navigation/stack — native-stack is used instead
+
+### Packages requiring a new dev build to test
+- expo-notifications — already installed and baked into current dev APK. Any changes to app.json plugins or new native packages require a new EAS build.
 
 ---
 
@@ -94,8 +105,8 @@ To get a raw URL: open the file on GitHub → click "Raw" → copy that URL and 
 
 ```
 PastSelfApp/
-├── App.tsx                    # Root navigation, font loading, trigger interval
-├── app.json                   # Expo config — plugins: expo-camera, expo-video only
+├── App.tsx                    # Root navigation, font loading, trigger interval, notification listeners
+├── app.json                   # Expo config — plugins: expo-camera, expo-video, expo-notifications
 ├── CLAUDE.md                  # This file
 ├── assets/
 │   ├── fonts/                 # Local font files — DancingScript-Bold.ttf, Inter-Regular.ttf, etc.
@@ -142,14 +153,14 @@ Login prompt appears on ConfirmationScreen ~800ms after the first video is saved
 ### Filter/sort — deliberately cut
 No filter or sort on the home screen. The list is short enough that it's not needed, and adding it would add UI complexity with no real payoff at this stage. Revisit only if user research proves otherwise.
 
-### Notifications — deliberately not the trigger mechanism
-Simple push notifications (expo-notifications) were evaluated and rejected as the primary trigger for App Guard. A notification the user can swipe away defeats the entire emotional core of the app. The real solution is App Guard (OS-level interception). Notifications may still be added as a supplementary reminder system later, but never as the primary trigger.
+### Datetime triggers — delivered via local notifications
+expo-notifications fires a local notification at exactly the scheduled time, even when the app is closed. On Android this is a heads-up banner the user taps to open the video. Full-screen lockscreen interception (video appearing without tap) is technically possible but requires a custom native module and is deferred to the App Guard build — it will be extended to datetime triggers at that point. This is a deliberate sequencing decision, not a limitation we're ignoring.
 
-### App Guard — core feature, v1 target
-App Guard is the founding vision of the app — forcing the video on screen before the user can open Instagram or any other app. It is NOT a nice-to-have. It is being built as part of v1.
+### App Guard — core feature, next major build
+App Guard is the founding vision of the app — forcing the video on screen before the user can open Instagram or any other app. It is NOT a nice-to-have.
 
 **Platform strategy:**
-- **Android first** — uses `AccessibilityService` to detect app launches and intercept. No special approval needed. No paid account needed to build and test. Being built now.
+- **Android first** — uses `AccessibilityService` to detect app launches and intercept. No special approval needed. No paid account needed to build and test.
 - **iOS** — requires Apple Developer account ($99/year, needed anyway for App Store) + `com.apple.developer.family-controls` entitlement (free but requires Apple approval — write explaining Past.Self. is a self-accountability/habit-breaking app). Apps like "One Sec" have this approved. iOS App Guard comes after Android is working and the developer account is sorted.
 
 **Implementation path (Android):**
@@ -157,8 +168,13 @@ App Guard is the founding vision of the app — forcing the video on screen befo
 - No full ejection from Expo — custom native modules work alongside managed Expo workflow via development builds
 - Testing: Expo Development Build on real Android device (not Expo Go — Expo Go can't run custom native modules)
 - EAS account created at expo.dev — needed for development builds
+- App picker: native `PackageManager` query returns all user-facing installed apps with name + packageName. Replaces the current hardcoded `POPULAR_APPS` list in ScheduleScreen and EditScreen.
 
-**Do NOT implement notifications as a substitute for App Guard.** They are different things.
+**Do NOT implement notifications as a substitute for App Guard.** They are different things. Notifications handle datetime delivery. App Guard handles app-open interception.
+
+**Permissions for App Guard:**
+- AccessibilityService does NOT require "Appear on top" (`SYSTEM_ALERT_WINDOW`) — it launches an Activity with `FLAG_ACTIVITY_NEW_TASK` which is a different mechanism
+- Do not prompt for "Appear on top" until App Guard is built and the exact permissions needed are confirmed — previously added in error and removed
 
 ---
 
@@ -175,6 +191,7 @@ Home
   → Tap card → Edit → Confirmation → Home (stack reset)
   → Tap thumbnail → Playback (isTriggered: false) → back to Home
   → Auto-trigger → Playback (isTriggered: true) → Home
+  → Notification tap → Playback (isTriggered: true) → Home
 ```
 
 **CRITICAL navigation rules:**
@@ -229,12 +246,17 @@ Home
 - Video ID: Crypto.randomUUID() — NOT Date.now()
 - Re-record: navigation.replace('Record', { prefill }) — not navigate
 - Thumbnail: expo-video-thumbnails at time: 500, from permanent video URI
-- App Trigger section shows "Coming Soon" banner
+- Date/time picker: TWO separate pickers (mode="date" then mode="time") — never mode="datetime"
+- On save (datetime): cancels any previous notificationId (re-record path), schedules new notification, stores notificationId on video object
+- App Trigger section shows "Coming Soon" banner — will be replaced by native app picker (App Guard build)
 
 ### EditScreen
 - useSafeAreaInsets() — NOT SafeAreaView
 - RepeatOption typed state for repeat field
 - Re-record via BrandAlert confirmation
+- Date/time picker: TWO separate pickers (mode="date" then mode="time") — never mode="datetime"
+- On save: cancels old notificationId, schedules fresh notification at new time, stores new notificationId
+- Switching from datetime → app trigger: cancels pending notification, clears notificationId
 - App Trigger section shows "Coming Soon" banner
 
 ### PlaybackScreen
@@ -311,7 +333,8 @@ Home
 - Done: calls setOnboarded() then CommonActions.reset({ routes: [{ name: 'Home' }] })
 - Tap thumbnail → Playback (isTriggered: false)
 - Trigger card: icon + text centered with justifyContent: 'center'
-- **Login prompt modal (LoginPromptModal):** Defined at module level. Shown 800ms after screen mounts (delay lets the confirmation fade-in settle first). Checks `hasSeenLoginPrompt()` from storage — if false, shows modal. Both CTA buttons call `setLoginPromptSeen()` so it never shows again. Sign-in handler has a `// TODO` for when auth is built. Copy locked — see Key Product Decisions above.
+- **Login prompt modal (LoginPromptModal):** Defined at module level. Shown 800ms after screen mounts. Checks `hasSeenLoginPrompt()` from storage — if false, shows modal. Both CTA buttons call `setLoginPromptSeen()` so it never shows again. Sign-in handler has a `// TODO` for when auth is built. Copy locked — see Key Product Decisions above.
+- **No "Appear on top" permission prompt** — was added in error. That permission is not needed until App Guard is built and exact requirements are known. Removed.
 
 ---
 
@@ -322,22 +345,23 @@ Home
 type RepeatOption = 'never' | 'daily' | 'weekdays' | 'weekends' | 'weekly' | 'monthly';
 
 interface ScheduledVideo {
-  id: string;            // Crypto.randomUUID() — never Date.now()
-  videoUri: string;      // Permanent: documentDirectory/videos/{id}.mp4
-  thumbnail?: string;    // Permanent: documentDirectory/thumbnails/{id}.jpg
+  id: string;              // Crypto.randomUUID() — never Date.now()
+  videoUri: string;        // Permanent: documentDirectory/videos/{id}.mp4
+  thumbnail?: string;      // Permanent: documentDirectory/thumbnails/{id}.jpg
   title: string;
   message: string;
-  createdAt: string;     // ISO date string
-  scheduledFor?: string; // ISO string — datetime trigger only
-  repeat?: RepeatOption; // typed union, not string
+  createdAt: string;       // ISO date string
+  scheduledFor?: string;   // ISO string — datetime trigger only
+  repeat?: RepeatOption;   // typed union, not string
+  notificationId?: string; // expo-notifications ID — used to cancel on delete/edit
   appTrigger?: {
     appName: string;
     playOnce: boolean;
     hasPlayed?: boolean;
   };
-  duration: number;      // seconds
-  isActive: boolean;     // trigger system only — marks done/expired. NEVER for user pause.
-  isPaused?: boolean;    // user toggle only — paused videos skip all trigger checks
+  duration: number;        // seconds
+  isActive: boolean;       // trigger system only — marks done/expired. NEVER for user pause.
+  isPaused?: boolean;      // user toggle only — paused videos skip all trigger checks
 }
 
 // PrefillData — re-record flow: Edit/Schedule → Record → Schedule
@@ -449,9 +473,17 @@ radius.sm(6), radius.md(10), radius.lg(12), radius.xl(16), radius.full(999)
 - NOT called on nav mount / onLayoutRootView. Called in HomeScreen's useFocusEffect — fires only when user is on Home, never during Splash animation.
 - Also runs: 30s interval + AppState foreground (both in App.tsx)
 - navigationRef.current?.isReady() guard before navigate
-- One-shot datetime: marked isActive: false immediately on trigger
-- Repeating datetime: scheduledFor advanced to next future occurrence
+- One-shot datetime: marked isActive: false immediately on trigger. 5-second staleness window — anything older is silently deactivated (notification already handled it). This prevents videos re-triggering on app open if notification already fired.
+- Repeating datetime: scheduledFor advanced to next future occurrence, old notification cancelled, new one scheduled
 - Paused videos skipped entirely
+
+### Notification Scheduling
+
+- `scheduleVideoNotification(video)` — called on save in ScheduleScreen and on edit in EditScreen. Returns notificationId stored on the video object.
+- `cancelVideoNotification(notificationId)` — called on delete (in storage.ts deleteVideo), on re-record, and before rescheduling on edit.
+- `requestNotificationPermission()` — called inside scheduleVideoNotification. Shows system dialog on first call.
+- Notification data payload carries `videoId` — used by App.tsx listener to navigate to PlaybackScreen.
+- `handledNotifRef` in App.tsx tracks the last consumed notification identifier — prevents `getLastNotificationResponseAsync` from re-triggering a video when returning from Settings or other background trips.
 
 ### Onboarding Completion (CRITICAL)
 
@@ -509,8 +541,8 @@ handleDone only writes for appTrigger.playOnce case. Datetime one-shots already 
 
 - `hasSeenLoginPrompt()` — reads `pastself_login_prompted` from AsyncStorage
 - `setLoginPromptSeen()` — writes `'true'` to that key
-- Called in ConfirmationScreen on mount (with 800ms delay). Fires on first save only.
-- Both "Create free account" and "Maybe later" call setLoginPromptSeen() — one shot, never repeats.
+- Called in ConfirmationScreen on mount (with 800ms delay). Fires on first save only — one shot, never repeats.
+- Both "Create free account" and "Maybe later" call setLoginPromptSeen().
 
 ### RepeatOption
 
@@ -553,9 +585,31 @@ Clamps to last day of month: detects overflow via next.getDate() !== originalDay
         "backgroundColor": "#fde5ea"
       },
       "package": "com.pastself.app",
-      "permissions": ["CAMERA", "RECORD_AUDIO", "READ_EXTERNAL_STORAGE", "WRITE_EXTERNAL_STORAGE", "RECEIVE_BOOT_COMPLETED", "VIBRATE"]
+      "permissions": [
+        "CAMERA",
+        "RECORD_AUDIO",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "RECEIVE_BOOT_COMPLETED",
+        "VIBRATE",
+        "USE_FULL_SCREEN_INTENT",
+        "SCHEDULE_EXACT_ALARM",
+        "USE_EXACT_ALARM"
+      ]
     },
-    "plugins": ["expo-camera", "expo-video"]
+    "plugins": [
+      "expo-camera",
+      "expo-video",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/App_Icon.png",
+          "color": "#674454",
+          "androidMode": "default",
+          "androidCollapsedTitle": "Past.Self."
+        }
+      ]
+    ]
   }
 }
 ```
@@ -569,6 +623,7 @@ Clamps to last day of month: detects overflow via next.getDate() !== originalDay
 - Run `npx expo start --clear` on PC, scan QR with phone (same WiFi)
 - Use **"Reset app (dev)"** in Settings modal to test as new user
 - Expo Go CANNOT run custom native modules — needed for App Guard
+- expo-notifications is already in the current dev APK — no new build needed for notification changes
 
 ### Expo Development Build (for App Guard)
 - Required once native Android AccessibilityService module is added
@@ -616,6 +671,10 @@ Do NOT add any other reset mechanisms.
 - **SplashScreen:** MP4 video background (SparklesBG.mp4), shimmer gradient button, faster phrases, fixed font clipping, returning user path ~1.7s
 - **Fonts:** loaded from local assets/fonts/ — no network fetch, instant load on standalone build
 - Android Development Build: APK installed on device, tested
+- **expo-notifications:** exact-time datetime triggers via local notifications. Schedules on save, cancels on delete/edit, notificationId stored per video. Android: heads-up notification. iOS: tap-to-play notification.
+- **Date/time picker:** split into separate mode="date" + mode="time" pickers — black screen on Android with mode="datetime" fixed permanently
+- **Stale trigger bug fixed:** checkScheduledVideos one-shot window tightened to 5 seconds — past-due videos no longer re-trigger on every app open
+- **Notification response deduplication:** handledNotifRef in App.tsx prevents getLastNotificationResponseAsync from firing stale responses (e.g. returning from Settings)
 
 ### Known Issues / Pending
 - Multi-video trigger queue: if two or more videos are past-due simultaneously, only one triggers per check cycle. The second fires 30s later. Low severity.
@@ -623,9 +682,11 @@ Do NOT add any other reset mechanisms.
 - Login prompt sign-in handler is a stub — needs real auth screen when backend exists.
 - Rate Past.Self. URL: `idYOUR_APP_ID` placeholder — swap for real App Store ID at submission.
 - Shimmer button edges have a very slight hard clip on Android — inherent `overflow:hidden` limitation, not fixable without Skia. Leave as-is.
+- Full-screen lockscreen video for datetime triggers (video appears without tap) — deferred to App Guard native module build. Currently delivers as tap-to-play notification.
+- POPULAR_APPS hardcoded list in ScheduleScreen + EditScreen — will be replaced by native PackageManager query in App Guard build.
 
 ### TODO Before App Store
-- **App Guard — Android** (next major feature): custom Expo module, Android AccessibilityService, Expo Development Build
+- **App Guard — Android** (next major feature): custom Expo module, Android AccessibilityService, native PackageManager app picker, Expo Development Build
 - **App Guard — iOS**: requires Apple Developer account ($99/yr) + `com.apple.developer.family-controls` entitlement approval
 - Auth / account creation screen
 - Cloud backup

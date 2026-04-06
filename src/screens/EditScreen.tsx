@@ -10,7 +10,7 @@ import { Ionicons } from '@expo/vector-icons';
 // Use useSafeAreaInsets hook instead (same pattern as ScheduleScreen).
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { RootStackParamList, PrefillData } from '../../App';
-import { getVideos, updateVideo } from '../utils/storage';
+import { getVideos, updateVideo, scheduleVideoNotification, cancelVideoNotification } from '../utils/storage';
 import { ScheduledVideo, TriggerType, RepeatOption } from '../types/video';
 import { colors, fonts, spacing, radius } from '../styles/theme';
 import { BrandAlert, useBrandAlert } from '../components/BrandAlert';
@@ -37,7 +37,8 @@ export function EditScreen({ route, navigation }: Props) {
   const [message, setMessage] = useState('');
   const [triggerType, setTriggerType] = useState<TriggerType>('datetime');
   const [date, setDate] = useState(new Date());
-  const [showPicker, setShowPicker] = useState(false);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
   const [repeat, setRepeat] = useState<RepeatOption>('never'); // FIX: RepeatOption not string
   const [selectedApp, setSelectedApp] = useState('');
   const [playOnce, setPlayOnce] = useState(true);
@@ -114,7 +115,16 @@ export function EditScreen({ route, navigation }: Props) {
       updates.scheduledFor = date.toISOString();
       updates.repeat = repeat;
       updates.appTrigger = undefined;
+
+      // Cancel old notification and schedule a fresh one at the new time
+      if (video?.notificationId) await cancelVideoNotification(video.notificationId);
+      const tempVideo = { ...video!, ...updates } as ScheduledVideo;
+      const notificationId = await scheduleVideoNotification(tempVideo);
+      updates.notificationId = notificationId ?? undefined;
     } else {
+      // Switching to app trigger — cancel any pending datetime notification
+      if (video?.notificationId) await cancelVideoNotification(video.notificationId);
+      updates.notificationId = undefined;
       updates.appTrigger = { appName: selectedApp, playOnce, hasPlayed: false };
       updates.scheduledFor = undefined;
       updates.repeat = undefined;
@@ -197,19 +207,47 @@ export function EditScreen({ route, navigation }: Props) {
 
         {triggerType === 'datetime' && (
           <View style={styles.section}>
-            <TouchableOpacity style={styles.dateDisplay} onPress={() => setShowPicker(true)} activeOpacity={0.85}>
+            <TouchableOpacity style={styles.dateDisplay} onPress={() => setShowDatePicker(true)} activeOpacity={0.85}>
               <Ionicons name="calendar-outline" size={18} color={colors.danger} />
+              <Text style={styles.dateText}>{date.toLocaleDateString()}</Text>
+              <Ionicons name="chevron-forward" size={16} color={colors.textLight} />
+            </TouchableOpacity>
+            {showDatePicker && (
+              <DateTimePicker
+                value={date}
+                mode="date"
+                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                minimumDate={new Date()}
+                onChange={(_, selected) => {
+                  setShowDatePicker(Platform.OS === 'ios');
+                  if (selected) {
+                    const next = new Date(selected);
+                    next.setHours(date.getHours(), date.getMinutes(), 0, 0);
+                    setDate(next);
+                  }
+                }}
+              />
+            )}
+            <TouchableOpacity style={styles.dateDisplay} onPress={() => setShowTimePicker(true)} activeOpacity={0.85}>
+              <Ionicons name="time-outline" size={18} color={colors.danger} />
               <Text style={styles.dateText}>
-                {date.toLocaleDateString()} at {date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                {date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
               </Text>
               <Ionicons name="chevron-forward" size={16} color={colors.textLight} />
             </TouchableOpacity>
-            {showPicker && (
+            {showTimePicker && (
               <DateTimePicker
-                value={date} mode="datetime"
+                value={date}
+                mode="time"
                 display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                minimumDate={new Date()}
-                onChange={(_, s) => { setShowPicker(Platform.OS === 'ios'); if (s) setDate(s); }}
+                onChange={(_, selected) => {
+                  setShowTimePicker(Platform.OS === 'ios');
+                  if (selected) {
+                    const next = new Date(date);
+                    next.setHours(selected.getHours(), selected.getMinutes(), 0, 0);
+                    setDate(next);
+                  }
+                }}
               />
             )}
             <Text style={styles.sublabel}>Repeat</Text>
