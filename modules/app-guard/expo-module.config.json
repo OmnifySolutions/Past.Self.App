@@ -1,4 +1,5 @@
 {
+  "name": "app-guard",
   "platforms": ["android"],
   "android": {
     "modules": ["com.appguard.AppGuardModule"]
