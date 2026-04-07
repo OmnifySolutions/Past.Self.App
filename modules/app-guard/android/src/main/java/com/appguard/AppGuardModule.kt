@@ -20,7 +20,6 @@ class AppGuardModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("AppGuard")
 
-    // Declares the event JS can subscribe to via module.addListener("onAppGuardPlayed", ...)
     Events("onAppGuardPlayed")
 
     OnCreate {
@@ -54,15 +53,16 @@ class AppGuardModule : Module() {
     }
 
     Function("openAccessibilitySettings") {
-      val context = appContext.reactContext ?: return@Function
+      val context = appContext.reactContext ?: return@Function null
       val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
         flags = Intent.FLAG_ACTIVITY_NEW_TASK
       }
       context.startActivity(intent)
+      null
     }
 
     Function("setWatchedApps") { apps: List<Map<String, String>> ->
-      val context = appContext.reactContext ?: return@Function
+      val context = appContext.reactContext ?: return@Function null
       val parsed = apps.mapNotNull { map ->
         val pkg      = map["packageName"] ?: return@mapNotNull null
         val appName  = map["appName"]     ?: return@mapNotNull null
@@ -71,6 +71,7 @@ class AppGuardModule : Module() {
         WatchedApp(pkg, appName, videoUri, videoId)
       }
       AppGuardService.updateWatchedApps(context, parsed)
+      null
     }
 
     AsyncFunction("getInstalledApps") { promise: Promise ->
