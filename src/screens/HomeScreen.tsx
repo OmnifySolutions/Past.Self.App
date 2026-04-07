@@ -10,7 +10,7 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Circle, Line } from 'react-native-svg';
 import { RootStackParamList } from '../../App';
-import { getVideos, deleteVideo, saveVideos, updateVideo, checkScheduledVideos } from '../utils/storage';
+import { getVideos, deleteVideo, saveVideos, updateVideo, checkScheduledVideos, cancelVideoNotification, scheduleVideoNotification } from '../utils/storage';
 import { ScheduledVideo } from '../types/video';
 import { colors, fonts, spacing, radius } from '../styles/theme';
 
@@ -36,7 +36,6 @@ const ClockIcon = () => (
 );
 
 // ─── 6-dot drag handle icon ───────────────────────────────────────────────────
-// Two columns of 3 dots — the universal drag handle pattern. Not intrusive.
 const DragDots = () => (
   <Svg width={12} height={18} viewBox="0 0 12 18">
     <Circle cx={3}  cy={3}  r={1.5} fill={colors.textLight} />
@@ -141,22 +140,6 @@ const SwipeableCard = ({ onDelete, freeze, closeSignal, children }: SwipeableCar
 };
 
 // ─── Drag-to-reorder list ─────────────────────────────────────────────────────
-//
-// FIX: setState-in-render
-// Previously: PanResponders were created lazily inside getPanResponder() called during render.
-// React treats any side effect (including ref writes + state calls inside closures) that
-// happens during the render pass as a violation. The error manifested as "Cannot update
-// a component while rendering a different component."
-//
-// Fix: All PanResponders are created in a useEffect (after mount / when orderedIds changes),
-// stored in panResponders ref. The render function only READS from this ref — no creation,
-// no side effects during render.
-//
-// ANIMATIONS:
-// - Grabbed card: scale 1.05 + shadow lift
-// - Other cards: slide up/down via per-item translateY Animated.Value as dragged card passes
-// - Target slot card: jiggle (±3px, 2 cycles) when dragged card first hovers over it
-// - Release: spring snap back, LayoutAnimation for list reorder
 
 const DraggableList = ({
   items,
@@ -182,7 +165,6 @@ const DraggableList = ({
 
   useEffect(() => { orderedIdsRef.current = orderedIds; }, [orderedIds]);
 
-  // Per-item animated values — must exist before PanResponders are created
   const scaleAnims  = useRef<Record<string, Animated.Value>>({});
   const slideAnims  = useRef<Record<string, Animated.Value>>({});
   const jiggleAnims = useRef<Record<string, Animated.Value>>({});
@@ -444,9 +426,6 @@ const HowItWorks = () => (
 );
 
 // ─── Settings Modal ───────────────────────────────────────────────────────────
-// Defined at module level — never inline — to prevent remount on parent re-render.
-// Uses Animated slide-down for dismiss. No backdrop tap-to-close (handle communicates that).
-// No X button — the handle bar is the visual cue for swipe-to-dismiss.
 type SettingsRow = {
   icon: React.ComponentProps<typeof Ionicons>['name'];
   label: string;
@@ -509,12 +488,10 @@ const SettingsModal = ({
 
   return (
     <Modal visible transparent animationType="none" onRequestClose={onClose}>
-      {/* Backdrop — separate animated view, tappable to close */}
       <Animated.View style={[sm.backdrop, { opacity: backdropOpacity }]}>
         <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onClose} />
       </Animated.View>
 
-      {/* Sheet slides up from bottom */}
       <Animated.View style={[sm.sheet, { transform: [{ translateY }] }]}>
         <Text style={sm.title}>Settings</Text>
 
@@ -579,7 +556,24 @@ export function HomeScreen({ navigation }: Props) {
   };
 
   const handleTogglePaused = async (video: ScheduledVideo) => {
-    await updateVideo(video.id, { isPaused: !video.isPaused });
+    const nowPaused = !video.isPaused;
+    const updates: Partial<ScheduledVideo> = { isPaused: nowPaused };
+
+    if (nowPaused) {
+      // Pausing — cancel any pending notification so it cannot fire while paused
+      if (video.notificationId) {
+        await cancelVideoNotification(video.notificationId);
+        updates.notificationId = undefined;
+      }
+    } else {
+      // Unpausing — reschedule notification if trigger is still in the future
+      if (video.scheduledFor && video.isActive) {
+        const newNotifId = await scheduleVideoNotification({ ...video, isPaused: false });
+        if (newNotifId) updates.notificationId = newNotifId;
+      }
+    }
+
+    await updateVideo(video.id, updates);
     reload();
   };
 
@@ -856,7 +850,6 @@ const s = StyleSheet.create({
     shadowColor: '#000', shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.2, shadowRadius: 12, elevation: 12,
   },
-  // Handle: tall enough touch target, horizontally compact
   dragHandle:        { paddingHorizontal: spacing.xs, paddingVertical: spacing.md, justifyContent: 'center', alignItems: 'center' },
   draggableCardWrap: { flex: 1 },
 
@@ -915,12 +908,10 @@ const s = StyleSheet.create({
 
 // ─── Settings modal styles ─────────────────────────────────────────────────────
 const sm = StyleSheet.create({
-  // Backdrop: full-screen dim layer, animates independently from sheet
   backdrop: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: colors.overlay,
   },
-  // Sheet: pinned to bottom, slides up via translateY animation
   sheet: {
     position: 'absolute',
     bottom: 0,

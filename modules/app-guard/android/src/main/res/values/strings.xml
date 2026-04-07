@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Place this file at:
+  modules/app-guard/android/src/main/res/values/strings.xml
+
+  The appguard_service_description string appears in Android Accessibility Settings
+  under Past.Self. — it explains what the service does to the user.
+  Keep it honest and clear — Android may reject vague descriptions.
+-->
+<resources>
+  <string name="appguard_service_description">
+    Past.Self. App Guard detects when you open selected apps and plays a motivational
+    video message from your past self before you can use them.
+  </string>
+</resources>

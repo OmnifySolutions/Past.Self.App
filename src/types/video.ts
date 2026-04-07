@@ -12,7 +12,8 @@ export interface ScheduledVideo {
   repeat?: RepeatOption;         // FIX: was `string`, now strictly typed
   notificationId?: string;       // expo-notifications identifier — used to cancel on delete/edit
   appTrigger?: {
-    appName: string;
+    appName: string;             // display name e.g. "Instagram"
+    packageName: string;         // Android package e.g. "com.instagram.android"
     playOnce: boolean;
     hasPlayed?: boolean;
   };

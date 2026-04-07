@@ -51,7 +51,8 @@
           "androidMode": "default",
           "androidCollapsedTitle": "Past.Self."
         }
-      ]
+      ],
+      "./modules/app-guard"
     ],
     "extra": {
       "eas": {

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  This file is NOT a standalone AndroidManifest.
+  These are the ADDITIONS needed inside the <application> block of your main AndroidManifest.xml.
+  Expo merges this automatically because it lives inside the native module.
+  You do not need to manually edit any AndroidManifest — EAS build handles the merge.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+  <application>
+
+    <!-- AppGuard AccessibilityService -->
+    <service
+      android:name="com.appguard.AppGuardService"
+      android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+      android:exported="true">
+      <intent-filter>
+        <action android:name="android.accessibilityservice.AccessibilityService" />
+      </intent-filter>
+      <meta-data
+        android:name="android.accessibilityservice"
+        android:resource="@xml/appguard_accessibility_config" />
+    </service>
+
+    <!-- Full-screen intercept Activity -->
+    <activity
+      android:name="com.appguard.InterceptActivity"
+      android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen"
+      android:launchMode="singleTop"
+      android:showOnLockScreen="true"
+      android:turnScreenOn="true"
+      android:exported="false" />
+
+  </application>
+
+</manifest>
