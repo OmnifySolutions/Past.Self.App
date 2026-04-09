@@ -62,9 +62,6 @@ class InterceptActivity : Activity() {
       )
     }
 
-    // Full-screen immersive
-    makeFullScreen()
-
     val videoUri = intent.getStringExtra(EXTRA_VIDEO_URI) ?: run { finish(); return }
     videoId      = intent.getStringExtra(EXTRA_VIDEO_ID)  ?: ""
     appName      = intent.getStringExtra(EXTRA_APP_NAME)  ?: ""
@@ -123,6 +120,9 @@ class InterceptActivity : Activity() {
     root.addView(topBar)
 
     setContentView(root)
+
+    // Full-screen immersive — must be called after setContentView so DecorView exists
+    makeFullScreen()
 
     // Set up video
     videoView.setVideoURI(Uri.parse(videoUri))
