@@ -9,6 +9,7 @@ import * as Notifications from 'expo-notifications';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { isOnboarded, checkScheduledVideos, getVideos, updateVideo } from './src/utils/storage';
+import { initSubscription } from './src/utils/subscription';
 import { SplashScreen as AppSplash } from './src/screens/SplashScreen';
 import { OnboardingCameraScreen } from './src/screens/OnboardingCameraScreen';
 import { HomeScreen } from './src/screens/HomeScreen';
@@ -88,12 +89,18 @@ async function syncWatchedApps() {
   try {
     const videos = await getVideos();
     const watched = videos
-      .filter(v => v.appTrigger && v.isActive && !v.isPaused)
+      .filter(v =>
+        v.appTrigger &&
+        v.isActive &&
+        !v.isPaused &&
+        !(v.appTrigger.playOnce && v.appTrigger.hasPlayed)
+      )
       .map(v => ({
         packageName: v.appTrigger!.packageName,
         appName:     v.appTrigger!.appName,
         videoUri:    v.videoUri,
         videoId:     v.id,
+        cooldownMs:  (v.appTrigger!.cooldownMinutes ?? 30) * 60 * 1000,
       }));
     AppGuard.setWatchedApps(watched);
   } catch (e) {
@@ -159,6 +166,7 @@ export default function App() {
           if (video.appTrigger.playOnce) {
             await updateVideo(videoId, {
               appTrigger: { ...video.appTrigger, hasPlayed: true },
+              isActive: false,
             });
           }
           syncWatchedApps();
@@ -179,6 +187,7 @@ export default function App() {
   useEffect(() => {
     async function prepare() {
       try {
+        initSubscription();
         await Font.loadAsync({
           DancingScript_700Bold: require('./assets/fonts/DancingScript-Bold.ttf'),
           Montserrat_500Medium:  require('./assets/fonts/Montserrat-Medium.ttf'),

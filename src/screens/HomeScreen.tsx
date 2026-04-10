@@ -15,6 +15,9 @@ import { ScheduledVideo } from '../types/video';
 import { colors, fonts, spacing, radius } from '../styles/theme';
 
 import { getNextOccurrence, getRepeatDescription } from '../utils/repeatUtils';
+import { useSubscription } from '../hooks/useSubscription';
+import { FREE_VIDEO_LIMIT } from '../utils/subscription';
+import { PaywallModal } from '../components/PaywallModal';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -535,6 +538,17 @@ export function HomeScreen({ navigation }: Props) {
   const [scrollEnabled, setScrollEnabled] = useState(true);
   const [closeSignal, setCloseSignal]     = useState(0);
   const [settingsVisible, setSettingsVisible] = useState(false);
+  const [showPaywall, setShowPaywall]     = useState(false);
+
+  const { isPro, refresh: refreshPro } = useSubscription();
+
+  const handleRecord = useCallback(() => {
+    if (!isPro && videos.length >= FREE_VIDEO_LIMIT) {
+      setShowPaywall(true);
+      return;
+    }
+    navigation.navigate('Record', { prefill: undefined });
+  }, [isPro, videos.length, navigation]);
 
   useFocusEffect(
     useCallback(() => {
@@ -708,7 +722,7 @@ export function HomeScreen({ navigation }: Props) {
           >
             <Ionicons name="settings-outline" size={18} color={colors.textLight} />
           </TouchableOpacity>
-          <TouchableOpacity style={s.recordBtn} onPress={() => navigation.navigate('Record', { prefill: undefined })} activeOpacity={0.85}>
+          <TouchableOpacity style={s.recordBtn} onPress={handleRecord} activeOpacity={0.85}>
             <Ionicons name="add" size={18} color="#fff" />
             <Text style={s.recordBtnText}>Record</Text>
           </TouchableOpacity>
@@ -716,6 +730,12 @@ export function HomeScreen({ navigation }: Props) {
       </View>
 
       <SettingsModal visible={settingsVisible} onClose={() => setSettingsVisible(false)} />
+      <PaywallModal
+        visible={showPaywall}
+        onClose={() => setShowPaywall(false)}
+        onSuccess={() => { refreshPro(); setShowPaywall(false); }}
+        featureHint="You've hit the free limit. Upgrade to record unlimited messages."
+      />
 
       {!hasAnyVideos ? (
         <View style={s.emptyOuter}>
@@ -723,7 +743,7 @@ export function HomeScreen({ navigation }: Props) {
             <View style={s.emptyIcon}><ClockIcon /></View>
             <Text style={s.emptyTitle}>No videos yet</Text>
             <Text style={s.emptyBody}>{'Record your first message to your future self —\na reminder, a push, a promise.'}</Text>
-            <TouchableOpacity style={s.emptyButton} onPress={() => navigation.navigate('Record', { prefill: undefined })} activeOpacity={0.85}>
+            <TouchableOpacity style={s.emptyButton} onPress={handleRecord} activeOpacity={0.85}>
               <Ionicons name="add" size={20} color="#fff" />
               <Text style={s.emptyButtonText}>Get Started</Text>
             </TouchableOpacity>

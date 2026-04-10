@@ -16,6 +16,7 @@ export interface ScheduledVideo {
     packageName: string;         // Android package e.g. "com.instagram.android"
     playOnce: boolean;
     hasPlayed?: boolean;
+    cooldownMinutes: number;     // minutes between re-triggers (default 30, configurable in paid)
   };
   duration: number;
   isActive: boolean;   // controlled by the trigger system (played, expired, etc.)

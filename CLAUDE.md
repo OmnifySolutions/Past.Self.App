@@ -257,9 +257,17 @@ Get-Content test-output.json | Select-String "appguard"
 
 ## Business Model
 
-- **Free:** limited recordings, datetime trigger only, no repeat
-- **Past.Self. Pro — €8.99 one-time:** unlimited, App Guard, repeat scheduling
+- **Free:** limited recordings, datetime trigger only, no repeat, App Guard cooldown locked at 30 min
+- **Monthly — €2.99/month:** unlimited recordings, App Guard, configurable cooldown (1 min–24 hrs), repeat scheduling
+- **Lifetime — €8.99 one-time:** everything in Monthly, forever
 - No ads, ever. Non-negotiable.
+
+### Cooldown Timer
+App Guard intercept will not re-fire for the same app within the cooldown window. Prevents annoyance when multitasking.
+- Default: 30 minutes (all users)
+- Free users: locked at 30 minutes
+- Paid users: configurable per video (1 min to 24 hrs) — UI to be added when subscription system is built
+- Stored as `appTrigger.cooldownMinutes` per video, passed to native via `WatchedApp.cooldownMs`
 
 ---
 

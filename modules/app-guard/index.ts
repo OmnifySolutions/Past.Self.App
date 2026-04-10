@@ -5,6 +5,7 @@ export type WatchedApp = {
   appName: string;      // e.g. "Instagram"
   videoUri: string;
   videoId: string;
+  cooldownMs: number;   // milliseconds between re-triggers (default: 30 * 60 * 1000)
 };
 
 export type InstalledApp = {

@@ -136,6 +136,10 @@ export const checkScheduledVideos = async (): Promise<ScheduledVideo | null> => 
   for (const video of videos) {
     if (!video.isActive || video.isPaused) continue;
 
+    // App triggers are handled exclusively by AppGuardService (native).
+    // Skip here unconditionally so they never fall through to datetime logic.
+    if (video.appTrigger) continue;
+
     if (video.scheduledFor) {
       const scheduled = new Date(video.scheduledFor);
 
@@ -176,11 +180,6 @@ export const checkScheduledVideos = async (): Promise<ScheduledVideo | null> => 
       return video;
     }
 
-    // App trigger — handled by App Guard (native module).
-    // Only the playOnce+hasPlayed guard lives here for safety.
-    if (video.appTrigger) {
-      if (video.appTrigger.playOnce && video.appTrigger.hasPlayed) continue;
-    }
   }
 
   return null;

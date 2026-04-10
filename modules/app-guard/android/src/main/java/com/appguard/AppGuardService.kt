@@ -16,6 +16,10 @@ class AppGuardService : AccessibilityService() {
     private const val PREFS_NAME  = "AppGuardPrefs"
     private const val KEY_WATCHED = "watchedApps"
 
+    // Minimum gap between any two intercepts — prevents re-fire during orientation
+    // changes or spurious events. The configured cooldown is applied on top.
+    private const val MIN_COOLDOWN_MS = 3_000L
+
     // Called from AppGuardModule.setWatchedApps — persists the list so the
     // service can read it even after a process restart.
     fun updateWatchedApps(context: Context, apps: List<WatchedApp>) {
@@ -27,6 +31,7 @@ class AppGuardService : AccessibilityService() {
           put("appName",     app.appName)
           put("videoUri",    app.videoUri)
           put("videoId",     app.videoId)
+          put("cooldownMs",  app.cooldownMs)
         })
       }
       prefs.edit().putString(KEY_WATCHED, arr.toString()).apply()
@@ -52,6 +57,7 @@ class AppGuardService : AccessibilityService() {
             appName     = obj.getString("appName"),
             videoUri    = obj.getString("videoUri"),
             videoId     = obj.getString("videoId"),
+            cooldownMs  = obj.optLong("cooldownMs", 30 * 60 * 1000L),
           )
         }
       } catch (e: Exception) {
@@ -62,11 +68,8 @@ class AppGuardService : AccessibilityService() {
 
   private lateinit var prefs: SharedPreferences
 
-  // Track the last package we intercepted to avoid re-firing while the
-  // intercept Activity is still on screen (e.g. orientation change events).
-  private var lastInterceptedPackage: String? = null
-  private var lastInterceptTime: Long = 0L
-  private val INTERCEPT_COOLDOWN_MS = 3000L
+  // Per-package cooldown tracking — key: packageName, value: last intercept timestamp
+  private val lastInterceptTimes = mutableMapOf<String, Long>()
 
   override fun onServiceConnected() {
     prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -88,14 +91,20 @@ class AppGuardService : AccessibilityService() {
     // Ignore system UI and launchers
     if (pkg == "com.android.systemui" || pkg == "com.sec.android.app.launcher") return
 
-    val now = System.currentTimeMillis()
-    if (pkg == lastInterceptedPackage && (now - lastInterceptTime) < INTERCEPT_COOLDOWN_MS) return
+    val now      = System.currentTimeMillis()
+    val lastTime = lastInterceptTimes[pkg] ?: 0L
+
+    // Fast path: skip if within minimum cooldown (avoids loading JSON on every event)
+    if ((now - lastTime) < MIN_COOLDOWN_MS) return
 
     val watched = loadWatchedApps(prefs)
     val match   = watched.find { it.packageName == pkg } ?: return
 
-    lastInterceptedPackage = pkg
-    lastInterceptTime      = now
+    // Apply the configured cooldown for this video (minimum 3s floor)
+    val cooldown = maxOf(MIN_COOLDOWN_MS, match.cooldownMs)
+    if ((now - lastTime) < cooldown) return
+
+    lastInterceptTimes[pkg] = now
 
     val intent = Intent(applicationContext, InterceptActivity::class.java).apply {
       flags = Intent.FLAG_ACTIVITY_NEW_TASK or

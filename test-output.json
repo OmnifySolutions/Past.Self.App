@@ -21,7 +21,8 @@ public class ExpoModulesPackageList implements ModulesProvider {
     );
 
     static final List<Class<? extends Module>> modulesList = Arrays.<Class<? extends Module>>asList(
-            expo.modules.fetch.ExpoFetchModule.class,
+            com.appguard.AppGuardModule.class,
+      expo.modules.fetch.ExpoFetchModule.class,
       expo.modules.application.ApplicationModule.class,
       expo.modules.asset.AssetModule.class,
       expo.modules.camera.CameraViewModule.class,

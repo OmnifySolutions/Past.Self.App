@@ -2,6 +2,7 @@ package com.appguard
 
 import android.app.Activity
 import android.content.Intent
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -10,24 +11,22 @@ import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.view.WindowManager
 import android.widget.VideoView
-import android.widget.ImageButton
 import android.widget.TextView
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.graphics.Color
 import android.view.Gravity
-import android.widget.MediaController
 
 // InterceptActivity
 //
 // Launched by AppGuardService when a watched app is opened.
 // Appears full-screen over the lockscreen / above the target app.
-// Plays the video, then dismisses itself (returning the user to wherever they were,
-// which may be the target app or the home screen — that's intentional friction).
+// Plays the video. When it ends, a Done button appears — tapping it launches
+// the target app (returning the user to where they were going) and dismisses.
+// Skip (after 5s) also marks the video played so play-once works correctly.
 //
 // No React Native context here — this is a pure Android Activity.
-// We navigate into the RN app via an explicit Intent after the video ends,
-// so the main app can mark the video as played in AsyncStorage.
+// We notify App.tsx via a local broadcast so it can update AsyncStorage.
 
 class InterceptActivity : Activity() {
 
@@ -42,9 +41,11 @@ class InterceptActivity : Activity() {
   }
 
   private lateinit var videoView: VideoView
-  private var videoId: String  = ""
-  private var appName: String  = ""
-  private var videoEnded: Boolean = false
+  private var videoId: String       = ""
+  private var appName: String       = ""
+  private var targetPackage: String = ""
+  private var videoEnded: Boolean   = false
+  private var playedNotified: Boolean = false  // guard against double-broadcast
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
@@ -62,9 +63,10 @@ class InterceptActivity : Activity() {
       )
     }
 
-    val videoUri = intent.getStringExtra(EXTRA_VIDEO_URI) ?: run { finish(); return }
-    videoId      = intent.getStringExtra(EXTRA_VIDEO_ID)  ?: ""
-    appName      = intent.getStringExtra(EXTRA_APP_NAME)  ?: ""
+    val videoUri  = intent.getStringExtra(EXTRA_VIDEO_URI) ?: run { finish(); return }
+    videoId       = intent.getStringExtra(EXTRA_VIDEO_ID)  ?: ""
+    appName       = intent.getStringExtra(EXTRA_APP_NAME)  ?: ""
+    targetPackage = intent.getStringExtra(EXTRA_PACKAGE)   ?: ""
 
     buildUI(videoUri)
   }
@@ -112,12 +114,45 @@ class InterceptActivity : Activity() {
       alpha = 0.7f
       setPadding(24, 16, 0, 16)
       visibility = View.INVISIBLE // revealed after 5 seconds
-      setOnClickListener { dismiss() }
+      setOnClickListener {
+        // Mark played even on skip — ensures play-once doesn't re-trigger
+        notifyPlayed()
+        dismiss()
+      }
     }
 
     topBar.addView(label)
     topBar.addView(skipBtn)
     root.addView(topBar)
+
+    // Done button — shown after video ends, bottom-center
+    // Tapping it launches the target app and dismisses the intercept
+    val doneBtnBg = GradientDrawable().apply {
+      shape = GradientDrawable.RECTANGLE
+      cornerRadius = 999f
+      setColor(Color.argb(200, 103, 68, 84)) // #674454 at ~78% opacity
+    }
+    val doneBtn = TextView(this).apply {
+      text = "Done  ✓"
+      setTextColor(Color.WHITE)
+      textSize = 16f
+      setPadding(64, 28, 64, 28)
+      background = doneBtnBg
+      visibility = View.INVISIBLE
+      layoutParams = FrameLayout.LayoutParams(
+        FrameLayout.LayoutParams.WRAP_CONTENT,
+        FrameLayout.LayoutParams.WRAP_CONTENT,
+        Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+      ).apply {
+        bottomMargin = 120
+      }
+      setOnClickListener {
+        notifyPlayed()
+        launchTargetApp()
+        dismiss()
+      }
+    }
+    root.addView(doneBtn)
 
     setContentView(root)
 
@@ -136,8 +171,9 @@ class InterceptActivity : Activity() {
     videoView.setOnCompletionListener {
       if (!videoEnded) {
         videoEnded = true
-        notifyPlayed()
-        dismiss()
+        // Don't auto-dismiss — show Done so user consciously continues to the target app
+        skipBtn.visibility = View.INVISIBLE
+        doneBtn.visibility = View.VISIBLE
       }
     }
     videoView.setOnErrorListener { _, _, _ ->
@@ -147,7 +183,8 @@ class InterceptActivity : Activity() {
   }
 
   private fun notifyPlayed() {
-    // Broadcast so App.tsx can mark this video as played in AsyncStorage
+    if (playedNotified) return  // prevent double-broadcast
+    playedNotified = true
     val intent = Intent(ACTION_VIDEO_PLAYED).apply {
       putExtra(EXTRA_VIDEO_ID, videoId)
       setPackage(applicationContext.packageName)
@@ -155,9 +192,16 @@ class InterceptActivity : Activity() {
     sendBroadcast(intent)
   }
 
+  private fun launchTargetApp() {
+    if (targetPackage.isEmpty()) return
+    val launchIntent = packageManager.getLaunchIntentForPackage(targetPackage) ?: return
+    launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+    startActivity(launchIntent)
+  }
+
   private fun dismiss() {
     finish()
-    // No animation — instant dismiss so the user lands on whatever is beneath
+    // No animation — instant dismiss
     overridePendingTransition(0, 0)
   }
 

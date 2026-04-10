@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Animated } from 'react-native';
 import { useEventListener } from 'expo';
 import { VideoView, useVideoPlayer } from 'expo-video';
+import { CommonActions } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -78,7 +79,11 @@ function PlayerView({
         isActive: false,
       });
     }
-    navigation.goBack();
+    if (isTriggered) {
+      navigation.dispatch(CommonActions.reset({ routes: [{ name: 'Home' }] }));
+    } else {
+      navigation.goBack();
+    }
   };
 
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;

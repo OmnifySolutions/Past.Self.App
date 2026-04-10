@@ -61,14 +61,15 @@ class AppGuardModule : Module() {
       null
     }
 
-    Function("setWatchedApps") { apps: List<Map<String, String>> ->
+    Function("setWatchedApps") { apps: List<Map<String, Any>> ->
       val context = appContext.reactContext ?: return@Function null
       val parsed = apps.mapNotNull { map ->
-        val pkg      = map["packageName"] ?: return@mapNotNull null
-        val appName  = map["appName"]     ?: return@mapNotNull null
-        val videoUri = map["videoUri"]    ?: return@mapNotNull null
-        val videoId  = map["videoId"]     ?: return@mapNotNull null
-        WatchedApp(pkg, appName, videoUri, videoId)
+        val pkg        = map["packageName"] as? String ?: return@mapNotNull null
+        val appName    = map["appName"]     as? String ?: return@mapNotNull null
+        val videoUri   = map["videoUri"]    as? String ?: return@mapNotNull null
+        val videoId    = map["videoId"]     as? String ?: return@mapNotNull null
+        val cooldownMs = (map["cooldownMs"] as? Number)?.toLong() ?: (30 * 60 * 1000L)
+        WatchedApp(pkg, appName, videoUri, videoId, cooldownMs)
       }
       AppGuardService.updateWatchedApps(context, parsed)
       null

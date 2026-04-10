@@ -18,6 +18,8 @@ import { colors, fonts, spacing, radius } from '../styles/theme';
 import { BrandAlert, useBrandAlert } from '../components/BrandAlert';
 import { getRepeatDescription, getNextOccurrence } from '../utils/repeatUtils';
 import AppGuard, { InstalledApp } from '../../modules/app-guard/index';
+import { useSubscription } from '../hooks/useSubscription';
+import { PaywallModal } from '../components/PaywallModal';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Schedule'>;
 
@@ -46,6 +48,9 @@ export function ScheduleScreen({ route, navigation }: Props) {
   );
   const [playOnce, setPlayOnce]       = useState(prefill?.playOnce ?? true);
   const [isSaving, setIsSaving]       = useState(false);
+  const [showPaywall, setShowPaywall] = useState(false);
+
+  const { isPro, refresh: refreshPro } = useSubscription();
 
   const [guardEnabled, setGuardEnabled]         = useState(false);
   const [installedApps, setInstalledApps]       = useState<InstalledApp[]>([]);
@@ -145,10 +150,11 @@ export function ScheduleScreen({ route, navigation }: Props) {
         ...(triggerType === 'datetime'
           ? { scheduledFor: date.toISOString(), repeat }
           : { appTrigger: {
-              appName:     selectedApp!.appName,
-              packageName: selectedApp!.packageName,
+              appName:        selectedApp!.appName,
+              packageName:    selectedApp!.packageName,
               playOnce,
-              hasPlayed: false,
+              hasPlayed:      false,
+              cooldownMinutes: 30,
             }}
         ),
       };
@@ -302,9 +308,16 @@ export function ScheduleScreen({ route, navigation }: Props) {
                 <TouchableOpacity
                   key={opt.value}
                   style={[styles.chip, repeat === opt.value && styles.chipActive]}
-                  onPress={() => setRepeat(opt.value)} activeOpacity={0.85}
+                  onPress={() => {
+                    if (opt.value !== 'never' && !isPro) { setShowPaywall(true); return; }
+                    setRepeat(opt.value);
+                  }}
+                  activeOpacity={0.85}
                 >
                   <Text style={[styles.chipText, repeat === opt.value && styles.chipTextActive]}>{opt.label}</Text>
+                  {opt.value !== 'never' && !isPro && (
+                    <Ionicons name="lock-closed" size={10} color={colors.textLight} style={{ marginLeft: 3 }} />
+                  )}
                 </TouchableOpacity>
               ))}
             </View>
@@ -366,8 +379,14 @@ export function ScheduleScreen({ route, navigation }: Props) {
                 <Text style={styles.playOnceTitle}>Play once</Text>
                 {playOnce && <Text style={styles.playOnceHint}>Only plays the first time you open the app</Text>}
               </View>
-              <Switch value={playOnce} onValueChange={setPlayOnce}
-                trackColor={{ false: '#d1d5db', true: colors.accent }} thumbColor="#fff" />
+              <Switch
+                value={playOnce}
+                onValueChange={val => {
+                  if (!val && !isPro) { setShowPaywall(true); return; }
+                  setPlayOnce(val);
+                }}
+                trackColor={{ false: '#d1d5db', true: colors.accent }} thumbColor="#fff"
+              />
             </View>
             {!playOnce && (
               <Text style={styles.alwaysHint}>
@@ -432,6 +451,12 @@ export function ScheduleScreen({ route, navigation }: Props) {
           )}
         </View>
       </Modal>
+
+      <PaywallModal
+        visible={showPaywall}
+        onClose={() => setShowPaywall(false)}
+        onSuccess={() => { refreshPro(); setShowPaywall(false); }}
+      />
     </View>
   );
 }

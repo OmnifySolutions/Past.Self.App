@@ -15,6 +15,8 @@ import { colors, fonts, spacing, radius } from '../styles/theme';
 import { BrandAlert, useBrandAlert } from '../components/BrandAlert';
 import { getRepeatDescription, getNextOccurrence } from '../utils/repeatUtils';
 import AppGuard, { InstalledApp } from '../../modules/app-guard/index';
+import { useSubscription } from '../hooks/useSubscription';
+import { PaywallModal } from '../components/PaywallModal';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Edit'>;
 
@@ -41,6 +43,9 @@ export function EditScreen({ route, navigation }: Props) {
   const [repeat, setRepeat]           = useState<RepeatOption>('never');
   const [selectedApp, setSelectedApp] = useState<InstalledApp | null>(null);
   const [playOnce, setPlayOnce]       = useState(true);
+  const [showPaywall, setShowPaywall] = useState(false);
+
+  const { isPro, refresh: refreshPro } = useSubscription();
 
   const [guardEnabled, setGuardEnabled]         = useState(false);
   const [installedApps, setInstalledApps]       = useState<InstalledApp[]>([]);
@@ -144,10 +149,11 @@ export function EditScreen({ route, navigation }: Props) {
       if (video?.notificationId) await cancelVideoNotification(video.notificationId);
       updates.notificationId = undefined;
       updates.appTrigger     = {
-        appName:     selectedApp!.appName,
-        packageName: selectedApp!.packageName,
+        appName:        selectedApp!.appName,
+        packageName:    selectedApp!.packageName,
         playOnce,
-        hasPlayed: false,
+        hasPlayed:      false,
+        cooldownMinutes: 30,
       };
       updates.scheduledFor = undefined;
       updates.repeat       = undefined;
@@ -251,8 +257,15 @@ export function EditScreen({ route, navigation }: Props) {
               {REPEAT_OPTIONS.map(opt => (
                 <TouchableOpacity key={opt.value}
                   style={[styles.chip, repeat === opt.value && styles.chipActive]}
-                  onPress={() => setRepeat(opt.value)} activeOpacity={0.85}>
+                  onPress={() => {
+                    if (opt.value !== 'never' && !isPro) { setShowPaywall(true); return; }
+                    setRepeat(opt.value);
+                  }}
+                  activeOpacity={0.85}>
                   <Text style={[styles.chipText, repeat === opt.value && styles.chipTextActive]}>{opt.label}</Text>
+                  {opt.value !== 'never' && !isPro && (
+                    <Ionicons name="lock-closed" size={10} color={colors.textLight} style={{ marginLeft: 3 }} />
+                  )}
                 </TouchableOpacity>
               ))}
             </View>
@@ -305,8 +318,14 @@ export function EditScreen({ route, navigation }: Props) {
                 <Text style={styles.playOnceTitle}>Play once</Text>
                 {playOnce && <Text style={styles.playOnceHint}>Only plays the first time you open the app</Text>}
               </View>
-              <Switch value={playOnce} onValueChange={setPlayOnce}
-                trackColor={{ false: '#d1d5db', true: colors.accent }} thumbColor="#fff" />
+              <Switch
+                value={playOnce}
+                onValueChange={val => {
+                  if (!val && !isPro) { setShowPaywall(true); return; }
+                  setPlayOnce(val);
+                }}
+                trackColor={{ false: '#d1d5db', true: colors.accent }} thumbColor="#fff"
+              />
             </View>
             {!playOnce && (
               <Text style={styles.alwaysHint}>{`Video will play every time you open ${selectedApp?.appName || 'this app'}`}</Text>
@@ -360,6 +379,12 @@ export function EditScreen({ route, navigation }: Props) {
           )}
         </View>
       </Modal>
+
+      <PaywallModal
+        visible={showPaywall}
+        onClose={() => setShowPaywall(false)}
+        onSuccess={() => { refreshPro(); setShowPaywall(false); }}
+      />
     </View>
   );
 }
